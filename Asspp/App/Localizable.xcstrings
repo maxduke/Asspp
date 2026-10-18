@@ -2880,6 +2880,54 @@
           }
         }
       }
+    },
+    "Preparing sign-in components. The first download may take a few minutes." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Preparing sign-in components. The first download may take a few minutes."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在准备登录组件，首次下载可能需要几分钟。"
+          }
+        }
+      }
+    },
+    "Preparing secure sign-in…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Preparing secure sign-in…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在准备安全登录…"
+          }
+        }
+      }
+    },
+    "Signing in to Apple…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Signing in to Apple…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在登录 Apple…"
+          }
+        }
+      }
     }
   },
   "version" : "1.1"

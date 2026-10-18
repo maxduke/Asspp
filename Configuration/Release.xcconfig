@@ -19,3 +19,6 @@ COPY_PHASE_STRIP = NO
 // MARK: - Script Sandboxing
 
 ENABLE_USER_SCRIPT_SANDBOXING = YES
+
+// The iOS source build uses Go module caches and downloads pinned TCI source.
+ENABLE_USER_SCRIPT_SANDBOXING[sdk=iphone*] = NO

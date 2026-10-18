@@ -77,3 +77,7 @@ ENABLE_PREVIEWS = YES
 SWIFT_EMIT_LOC_STRINGS = YES
 LD_RUNPATH_SEARCH_PATHS = $(inherited) @executable_path/Frameworks
 LD_RUNPATH_SEARCH_PATHS[sdk=macosx*] = $(inherited) @executable_path/../Frameworks
+
+// Source-built, non-JIT SAP runtime. Hide static runtime globals so a
+// LiveContainer guest does not export a second Go/Unicorn runtime to its host.
+OTHER_LDFLAGS[sdk=iphone*] = $(inherited) -L"$(SRCROOT)/.build/SAPRuntime/$(PLATFORM_NAME)" -Wl,-hidden-lAssppSAPRuntime -Wl,-hidden-lunicorn -lresolv -framework Security -framework CoreFoundation

@@ -92,13 +92,14 @@ class AppPackageArchive {
     func populateVersionIdentifiers(_ completion: (() async -> Void)? = nil) {
         guard let accountIdentifier, !loading else { return }
         let bundleID = package.software.bundleID
+        let entityType = package.entityType
         loading = true
         error = nil
 
         Task {
             do {
                 let versions = try await AppStore.this.withAccount(id: accountIdentifier) { userAccount in
-                    try await VersionFinder.list(account: &userAccount.account, bundleIdentifier: bundleID)
+                    try await VersionFinder.list(account: &userAccount.account, bundleIdentifier: bundleID, entityType: entityType)
                 }
                 self.versionIdentifiers = versions.reversed()
             } catch {
