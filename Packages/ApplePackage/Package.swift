@@ -12,7 +12,6 @@ nativeDependencies.append(.product(name: "Crypto", package: "swift-crypto"))
 nativeDependencies.append("AppleSAP")
 nativeTargets.append(.target(
     name: "AppleSAP",
-    dependencies: ["AppleSAPCore"],
     publicHeadersPath: "include",
     cSettings: [.unsafeFlags(["-fobjc-arc"])],
     linkerSettings: [.linkedFramework("Foundation")]
@@ -30,13 +29,12 @@ let package = Package(
         .package(url: "https://github.com/apple/swift-log.git", from: "1.5.0"),
     ] + extraDependencies,
     targets: nativeTargets + [
-        .target(name: "AppleSAPCore", publicHeadersPath: "include"),
         .target(name: "ApplePackage", dependencies: [
             .product(name: "ZIPFoundation", package: "ZIPFoundation"),
             .product(name: "AsyncHTTPClient", package: "async-http-client"),
             .product(name: "Collections", package: "swift-collections"),
             .product(name: "Logging", package: "swift-log"),
         ] + nativeDependencies),
-        .testTarget(name: "ApplePackageTests", dependencies: ["ApplePackage", "AppleSAPCore"]),
+        .testTarget(name: "ApplePackageTests", dependencies: ["ApplePackage"]),
     ]
 )

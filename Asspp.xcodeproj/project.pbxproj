@@ -220,7 +220,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "DEVELOPER_CONFIG=\"${SRCROOT}/Configuration/Developer.xcconfig\"\nTEMPLATE_CONFIG=\"${SRCROOT}/Configuration/Developer.xcconfig.template\"\n\nif [ ! -f \"$DEVELOPER_CONFIG\" ]; then\n    echo \"error: Developer.xcconfig not found!\"\n    echo \"error: Please copy Developer.xcconfig.template to Developer.xcconfig and configure your signing settings.\"\n    echo \"error: Run: cp \\\"$TEMPLATE_CONFIG\\\" \\\"$DEVELOPER_CONFIG\\\"\"\n    exit 1\nfi\n\necho \"Developer.xcconfig found.\"\n";
+			shellScript = "DEVELOPER_CONFIG=\"${SRCROOT}/Configuration/Developer.xcconfig\"\nTEMPLATE_CONFIG=\"${SRCROOT}/Configuration/Developer.xcconfig.template\"\n\nif [ ! -f \"$DEVELOPER_CONFIG\" ]; then\n    echo \"error: Developer.xcconfig not found!\"\n    echo \"error: Please copy Developer.xcconfig.template to Developer.xcconfig and configure your signing settings.\"\n    echo \"error: Run: cp \\\"$TEMPLATE_CONFIG\\\" \\\"$DEVELOPER_CONFIG\\\"\"\n    exit 1\nfi\n\necho \"Developer.xcconfig found.\"\n\ncase \"${PLATFORM_NAME}\" in\n    iphoneos|iphonesimulator)\n        \"${SRCROOT}/Packages/SAPRuntime/Scripts/build.sh\" \"${PLATFORM_NAME}\"\n        ;;\nesac\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 

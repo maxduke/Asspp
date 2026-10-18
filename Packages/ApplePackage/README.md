@@ -9,12 +9,11 @@ and its ArgumentParser dependency are omitted.
 The protocol changes follow these [majd/ipatool](https://github.com/majd/ipatool)
 updates:
 
-- August 28, 2026: SAP-signed authentication (`abd86cb`). Asspp uses the native
-  Apple signing primitives with an explicit GUID hardware block and
-  certificate/setup exchanges on iOS, following ipatool's initialization and
-  wire protocol. ipatool's CPU emulator and its jailbreak
-  iOS CLI are not embedded in this app. See
-  [SAP-AUTHENTICATION.md](SAP-AUTHENTICATION.md) for runtime requirements and limits.
+- August 28, 2026: SAP-signed authentication (`abd86cb`). iOS now embeds ipatool's
+  SAP engine from pinned source and executes it with a non-JIT TCI interpreter.
+  macOS retains its native CommerceKit signer. See
+  [SAP-AUTHENTICATION.md](SAP-AUTHENTICATION.md) and
+  [SAPRuntime](../SAPRuntime/README.md) for build steps and device validation.
 - September 13: recover empty/unavailable volumeStore responses through the bag's
   redownload/update endpoints (`30b2909`), and allow packages without SINF (`dd28a3a`).
 - September 18 / October 8: try consumer iPhone/iPad catalogs and the public iOS
@@ -50,12 +49,13 @@ Apple's system signing service. The offline suite does not require an Apple ID.
 Build both app targets through `Asspp.xcworkspace` on a Mac, and verify sign-in,
 2FA, free license acquisition, latest/historical downloads and IPA installation
 on the target Apple devices before release.
-Both native-wrapper builds returned `SSErrorDomain/122` inside LiveContainer on
-iOS 27.0.1; the latest result narrowed it to the first local exchange before any
-setup POST. The new iOS adapter initializes the raw SAP engine with the app's
-GUID hardware bytes and checks its result directly. Every handshake step retains
-its own error stage. Runtime export availability and device signing still need
-validation; self-signing alone is not a verified fix.
+The three previous native iOS approaches failed on iOS 27.0.1 in LiveContainer;
+all five raw SAP exports were unavailable in the last build. Those paths are
+removed. The source-built interpreter has completed real Apple setup and signed
+test payloads without credentials; LiveContainer account login still requires
+physical-device validation. iOS builds now require Go 1.26.6 and CMake. The
+interpreter includes GPL-2.0 code; notices and corresponding source accompany
+the IPA, with existing MIT source-file notices retained.
 
 The October 1 ipatool `ent/download` / kbsync generator is not ported: it depends
 on ipatool's emulated Apple runtime. This fork uses its supported legacy dispatch

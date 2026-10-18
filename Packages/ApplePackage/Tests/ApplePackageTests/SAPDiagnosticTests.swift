@@ -69,4 +69,19 @@ final class SAPDiagnosticTests: XCTestCase {
             XCTAssertFalse(message.contains("fixture-secret"))
         }
     }
+    func testInterpreterFailuresExposeOnlyPhaseAndNumericStatus() {
+        for stage in ["iOS.runtime.assets", "iOS.runtime.load", "iOS.runtime.initialize",
+                      "iOS.runtime.certificate", "iOS.runtime.exchange-request", "iOS.runtime.setup",
+                      "iOS.runtime.exchange-response", "iOS.runtime.ready", "iOS.runtime.sign",
+                      "iOS.runtime.timeout", "iOS.runtime.input", "iOS.runtime.failure", "iOS.runtime.wait"] {
+            let failure = SAPSigner.operationError(stage: stage, cause: NSError(
+                domain: "ApplePackage.SAP.Runtime", code: -42001,
+                userInfo: [NSLocalizedDescriptionKey: "fixture-secret", "body": "fixture-secret"]
+            ))
+            let message = SAPSigner.diagnosticError(failure).localizedDescription
+            XCTAssertTrue(message.contains("\(stage); ApplePackage.SAP/2 -> ApplePackage.SAP.Runtime/-42001"))
+            XCTAssertFalse(message.contains("fixture-secret"))
+        }
+    }
+
 }

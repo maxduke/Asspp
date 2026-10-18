@@ -2,19 +2,17 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
-/// Exchanges a SAP setup buffer with Apple's validated setup endpoint.
-typedef void (^APSAPSetupExchange)(
-    NSData *request,
-    void (^reply)(NSData * _Nullable data, NSError * _Nullable error)
-);
+@interface APSAPOperation : NSObject
+- (void)cancel;
+@end
 
-/// Signs the exact request bytes locally using the operating system's SAP implementation.
-/// The completion runs once, including when the system service times out.
-FOUNDATION_EXPORT void APSAPSignData(
+/// Signs the exact bytes locally. iOS uses the source-built TCI interpreter;
+/// macOS uses CommerceKit. Cancellation and completion are exactly once.
+FOUNDATION_EXPORT APSAPOperation *APSAPSignData(
     NSData *data,
     NSData * _Nullable hardwareID,
-    NSData * _Nullable certificate,
-    APSAPSetupExchange _Nullable exchange,
+    NSString * _Nullable cacheDirectory,
+    void (^ _Nullable progress)(NSInteger stage),
     void (^completion)(NSData * _Nullable signature, NSError * _Nullable error)
 );
 

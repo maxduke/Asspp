@@ -1,4 +1,3 @@
-import AsyncHTTPClient
 import Foundation
 #if canImport(AppleSAP)
 import AppleSAP
@@ -63,61 +62,54 @@ enum SAPSigner {
         return bytes
     }
 
-    static func sign(_ body: Data, bag: [String: Any], guid: String) async throws -> Data {
+    static func sign(
+        _ body: Data, bag: [String: Any], guid: String,
+        progress: (@Sendable (AuthenticationProgress) -> Void)? = nil
+    ) async throws -> Data {
         try Task.checkCancellation()
         #if canImport(AppleSAP)
-        #if os(iOS) && !targetEnvironment(simulator)
+        #if os(iOS)
         let hardwareID = try hardwareID(forGUID: guid)
-        let client = Configuration.makeHTTPClient(redirectConfiguration: .disallow)
-        defer { _ = client.shutdown() }
-        let certificate: Data
-        do {
-            certificate = try await SAPSetupProtocol.certificate(bag: bag) { request in
-                try await SAPSetupProtocol.send(request, using: client)
-            }
-        } catch {
+        // Resolve the actual guest container through Foundation. Go must not
+        // infer a path from the process HOME shared with LiveContainer.
+        let cache = try FileManager.default.url(for: .cachesDirectory, in: .userDomainMask,
+                                               appropriateFor: nil, create: true)
+            .appendingPathComponent("Asspp/SAP", isDirectory: true).path
+        #else
+        let hardwareID: Data? = nil
+        let cache: String? = nil
+        #endif
+        let cancellation = SAPCancellation()
+        return try await withTaskCancellationHandler {
             try Task.checkCancellation()
-            throw diagnosticError(operationError(stage: "iOS.certificate", cause: error))
-        }
-        let exchange: APSAPSetupExchange = { request, completion in
-            Task {
-                do {
-                    let reply = try await SAPSetupProtocol.exchange(request, bag: bag) { outgoing in
-                        try await SAPSetupProtocol.send(outgoing, using: client)
+            let signature: Data = try await withCheckedThrowingContinuation { continuation in
+                let operation = APSAPSignData(body, hardwareID, cache, { stage in
+                    progress?(stage == 1 ? .preparingComponents : .preparingSignature)
+                }) { signature, error in
+                    if let error {
+                        let failure = error as NSError
+                        if failure.domain == NSCocoaErrorDomain, failure.code == NSUserCancelledError {
+                            continuation.resume(throwing: CancellationError())
+                        } else {
+                            continuation.resume(throwing: diagnosticError(failure))
+                        }
+                    } else if let signature, !signature.isEmpty {
+                        continuation.resume(returning: signature)
+                    } else {
+                        continuation.resume(throwing: AuthenticationProtocol.ProtocolError("Apple SAP returned an empty signature."))
                     }
-                    completion(reply, nil)
-                } catch {
-                    completion(nil, error as NSError)
                 }
+                cancellation.install(operation)
             }
+            try Task.checkCancellation()
+            return signature
+        } onCancel: {
+            cancellation.cancel()
         }
-        return try await nativeSign(body, hardwareID: hardwareID, certificate: certificate, exchange: exchange)
         #else
-        return try await nativeSign(body, hardwareID: nil, certificate: nil, exchange: nil)
-        #endif
-        #else
-        throw AuthenticationProtocol.ProtocolError("Apple SAP signing requires a physical iOS device or macOS.")
+        throw AuthenticationProtocol.ProtocolError("Apple SAP signing requires iOS or macOS.")
         #endif
     }
-
-    #if canImport(AppleSAP)
-    private static func nativeSign(_ body: Data, hardwareID: Data?, certificate: Data?, exchange: APSAPSetupExchange?) async throws -> Data {
-        try Task.checkCancellation()
-        let signature: Data = try await withCheckedThrowingContinuation { continuation in
-            APSAPSignData(body, hardwareID, certificate, exchange) { signature, error in
-                if let error {
-                    continuation.resume(throwing: diagnosticError(error as NSError))
-                } else if let signature, !signature.isEmpty {
-                    continuation.resume(returning: signature)
-                } else {
-                    continuation.resume(throwing: AuthenticationProtocol.ProtocolError("Apple SAP returned an empty signature."))
-                }
-            }
-        }
-        try Task.checkCancellation()
-        return signature
-    }
-    #endif
 
     static func operationError(stage: String, cause: Error) -> NSError {
         NSError(domain: "ApplePackage.SAP", code: 2, userInfo: [
@@ -134,13 +126,17 @@ enum SAPSigner {
             "iOS.certificate", "iOS.context-init", "iOS.exchange-request",
             "iOS.engine-load", "iOS.engine-init",
             "iOS.setup-request", "iOS.exchange-response",
+            "iOS.runtime.assets", "iOS.runtime.load", "iOS.runtime.initialize",
+            "iOS.runtime.certificate", "iOS.runtime.exchange-request", "iOS.runtime.setup",
+            "iOS.runtime.exchange-response", "iOS.runtime.ready", "iOS.runtime.sign",
+            "iOS.runtime.timeout", "iOS.runtime.input", "iOS.runtime.failure", "iOS.runtime.wait",
             "macOS.load", "macOS.create-session", "macOS.open-session", "macOS.sign",
         ]
         let reportedStage = error.userInfo["ApplePackageSAPStage"] as? String ?? "native.sign"
         let stage = stages.contains(reportedStage) ? reportedStage : "native.sign"
         let domains: Set<String> = [
             "ApplePackage.SAP", "ApplePackage.SAP.HTTP", "SSErrorDomain", "SSVErrorDomain", "AMSErrorDomain", "ASDErrorDomain",
-            "ApplePackage.SAP.Native", "ApplePackage.SAP.Core", "ApplePackage.SAP.Symbols",
+            "ApplePackage.SAP.Native", "ApplePackage.SAP.Core", "ApplePackage.SAP.Symbols", "ApplePackage.SAP.Runtime",
             NSURLErrorDomain, NSCocoaErrorDomain, NSOSStatusErrorDomain,
             "kCFErrorDomainCFNetwork", "kCFErrorDomainOSStatus", "AKAuthenticationError",
         ]
@@ -159,3 +155,28 @@ enum SAPSigner {
         )
     }
 }
+
+#if canImport(AppleSAP)
+/// Cancellation can arrive before the synchronous C facade returns its token.
+private final class SAPCancellation: @unchecked Sendable {
+    private let lock = NSLock()
+    private var operation: APSAPOperation?
+    private var cancelled = false
+
+    func install(_ operation: APSAPOperation) {
+        lock.lock()
+        self.operation = operation
+        let shouldCancel = cancelled
+        lock.unlock()
+        if shouldCancel { operation.cancel() }
+    }
+
+    func cancel() {
+        lock.lock()
+        cancelled = true
+        let operation = operation
+        lock.unlock()
+        operation?.cancel()
+    }
+}
+#endif

@@ -15,7 +15,10 @@ extension AppStore {
     }
 
     @MainActor
-    func authenticate(email: String, password: String, code: String) async throws -> UserAccount {
+    func authenticate(
+        email: String, password: String, code: String,
+        progress: (@Sendable (AuthenticationProgress) -> Void)? = nil
+    ) async throws -> UserAccount {
         logger.info("starting authentication for user")
         do {
             let appleAccount = try await ApplePackage.Authenticator.authenticate(
@@ -23,7 +26,9 @@ extension AppStore {
                 password: password,
                 code: code,
                 cookies: [],
+                progress: progress,
             )
+            try Task.checkCancellation()
             let userAccount = save(email: email, account: appleAccount)
             logger.info("authentication successful for user")
             return userAccount

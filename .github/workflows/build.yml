@@ -45,10 +45,28 @@ jobs:
       - name: Ensure iOS platform is installed
         run: xcodebuild -downloadPlatform iOS || true
 
+      - name: Set up SAP build toolchain
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.6'
+          cache-dependency-path: Packages/SAPRuntime/go.sum
+
+      - name: Ensure CMake is available
+        run: command -v cmake || brew install cmake
+
       - name: Install Procursus
         uses: dhinakg/procursus-action@main
         with:
           packages: ldid findutils sed coreutils make
+
+      - name: Check SAP bridge against Apple SDKs
+        run: Packages/ApplePackage/Scripts/check-native-sap.sh
+
+      - name: Test statically linked interpreter and live Apple setup
+        env:
+          ASSPP_SAP_BUILD_ROOT: ${{ runner.temp }}/asspp-sap-runtime
+          ASSPP_SAP_LIVE_PROBE: '1'
+        run: Packages/SAPRuntime/Scripts/test-host.sh
 
       - name: Build
         run: |
@@ -60,6 +78,19 @@ jobs:
         with:
           name: Asspp.ipa
           path: Asspp.ipa
+
+      - name: Package corresponding sources
+        run: |
+          mkdir -p "${RUNNER_TEMP}/asspp-sources"
+          git archive HEAD | tar -x -C "${RUNNER_TEMP}/asspp-sources"
+          cp -R .build/SAPRuntime/source/unicorn-engine-sys-tci "${RUNNER_TEMP}/asspp-sources/Packages/SAPRuntime/UnicornTCISource"
+          tar -czf Asspp-sources.tar.gz -C "${RUNNER_TEMP}" asspp-sources
+
+      - name: Upload corresponding sources
+        uses: actions/upload-artifact@v4
+        with:
+          name: Asspp-sources
+          path: Asspp-sources.tar.gz
 
   build-osx:
     runs-on: macos-26

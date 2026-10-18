@@ -3,24 +3,35 @@ import Foundation
 import NIOCore
 import NIOHTTP1
 
+public enum AuthenticationProgress: Sendable {
+    case preparingComponents
+    case preparingSignature
+    case contactingApple
+}
+
 public enum Authenticator {
     public static func authenticate(
         email: String,
         password: String,
         code: String = "",
-        cookies: [Cookie] = []
+        cookies: [Cookie] = [],
+        progress: (@Sendable (AuthenticationProgress) -> Void)? = nil
     ) async throws -> Account {
         // Validate user input before touching either the Store or native signer.
         let code = try AuthenticationProtocol.normalizedCode(code)
         let guid = Configuration.deviceIdentifier
+        progress?(.contactingApple)
         let bag = try await Bag.fetchBag()
+        try Task.checkCancellation()
         let client = Configuration.makeHTTPClient(redirectConfiguration: .disallow)
         defer { _ = client.shutdown() }
         return try await authenticate(
             email: email, password: password, code: code, cookies: cookies,
             guid: guid, bag: bag,
             sign: { body, signingBag in
-                try await SAPSigner.sign(body, bag: signingBag, guid: guid)
+                let signature = try await SAPSigner.sign(body, bag: signingBag, guid: guid, progress: progress)
+                progress?(.contactingApple)
+                return signature
             },
             send: { request in
                 try await client.execute(request: request, deadline: .now() + .seconds(Configuration.timeoutRead)).get()

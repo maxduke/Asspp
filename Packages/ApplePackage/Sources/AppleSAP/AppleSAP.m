@@ -1,11 +1,11 @@
 #import "AppleSAP.h"
-#import "AppleSAPCore.h"
 #import <TargetConditionals.h>
 #import <dlfcn.h>
 #import <dispatch/dispatch.h>
+#if TARGET_OS_IOS
+#import "AssppSAPRuntime.h"
+#endif
 
-// Runtime interfaces, not hard-coded function addresses. Sources and limitations:
-// ../../SAP-AUTHENTICATION.md. Check every selector before calling private APIs.
 @interface APSAPDesktopSession : NSObject
 - (instancetype)initWithStoreClient:(id)client;
 - (void)openSessionWithCompletionHandler:(void (^)(void))completion;
@@ -28,73 +28,59 @@ static NSError *APSAPOperationError(NSString *stage, NSError *cause) {
     return [NSError errorWithDomain:@"ApplePackage.SAP" code:2 userInfo:info];
 }
 
-// A timeout can race with the native callback. Keeping completion ownership in a
-// locked object guarantees exactly one Swift continuation resume. A late native
-// result is discarded; its session still follows the normal cleanup path.
-@interface APSAPCompletion : NSObject
+@interface APSAPOperation ()
 @property(nonatomic, strong) NSLock *lock;
 @property(nonatomic, copy) void (^callback)(NSData *, NSError *);
+@property(nonatomic, copy) void (^progress)(NSInteger);
+@property(nonatomic) unsigned long long identifier;
+@property(nonatomic) BOOL cancelled;
 - (void)finish:(NSData *)signature error:(NSError *)error;
+- (void)attach:(unsigned long long)identifier;
+- (void)report:(NSInteger)stage;
 @end
 
-@implementation APSAPCompletion
+@implementation APSAPOperation
 - (void)finish:(NSData *)signature error:(NSError *)error {
     [self.lock lock];
     void (^callback)(NSData *, NSError *) = self.callback;
     self.callback = nil;
+    self.progress = nil;
     [self.lock unlock];
     if (callback) callback(signature, error);
 }
+- (void)cancel {
+    [self.lock lock];
+    self.cancelled = YES;
+#if TARGET_OS_IOS
+    unsigned long long identifier = self.identifier;
+#endif
+    [self.lock unlock];
+#if TARGET_OS_IOS
+    if (identifier) AssppSAPCancel(identifier);
+#endif
+    [self finish:nil error:[NSError errorWithDomain:NSCocoaErrorDomain code:NSUserCancelledError userInfo:nil]];
+}
+- (void)attach:(unsigned long long)identifier {
+    [self.lock lock];
+    self.identifier = identifier;
+#if TARGET_OS_IOS
+    BOOL cancelled = self.cancelled;
+#endif
+    [self.lock unlock];
+#if TARGET_OS_IOS
+    if (cancelled && identifier) AssppSAPCancel(identifier);
+#endif
+}
+- (void)report:(NSInteger)stage {
+    [self.lock lock];
+    void (^progress)(NSInteger) = self.progress;
+    [self.lock unlock];
+    if (progress) progress(stage);
+}
 @end
 
-#if TARGET_OS_IOS && !TARGET_OS_SIMULATOR
-static APSAPCoreFunctions APSAPMobileFunctions(unsigned int *missingSymbols) {
-    static APSAPCoreFunctions functions;
-    static unsigned int missing;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        // Use exported names, never image offsets or process-wide interposition.
-        // StoreServices can resolve dependency exports on older OS versions.
-        const char *paths[] = {
-            "/System/Library/PrivateFrameworks/AppleMediaServices.framework/AppleMediaServices",
-            "/System/Library/PrivateFrameworks/StoreServices.framework/StoreServices",
-        };
-        missing = 32;
-        for (unsigned int index = 0; index < sizeof(paths) / sizeof(paths[0]); index++) {
-            void *handle = dlopen(paths[index], RTLD_LAZY | RTLD_LOCAL);
-            if (!handle) continue;
-            APSAPCoreFunctions candidate = {0};
-            candidate.initialize = (__typeof__(candidate.initialize))dlsym(handle, "cp2g1b9ro");
-            candidate.exchange = (__typeof__(candidate.exchange))dlsym(handle, "Mib5yocT");
-            candidate.sign = (__typeof__(candidate.sign))dlsym(handle, "Fc3vhtJDvr");
-            candidate.teardown = (__typeof__(candidate.teardown))dlsym(handle, "IPaI1oem5iL");
-            candidate.dispose = (__typeof__(candidate.dispose))dlsym(handle, "jEHf8Xzsv8K");
-            unsigned int unavailable = (!candidate.initialize ? 1u : 0u) |
-                (!candidate.exchange ? 2u : 0u) | (!candidate.sign ? 4u : 0u) |
-                (!candidate.teardown ? 8u : 0u) | (!candidate.dispose ? 16u : 0u);
-            if (!unavailable) {
-                functions = candidate;
-                missing = 0;
-                break;
-            }
-            missing = unavailable;
-        }
-    });
-    *missingSymbols = missing;
-    return functions;
-}
-
-static NSError *APSAPCoreFailure(APSAPCoreResult result) {
-    if (result.error == APSAPCoreErrorNative) {
-        return [NSError errorWithDomain:@"ApplePackage.SAP.Native" code:result.nativeStatus userInfo:nil];
-    }
-    return [NSError errorWithDomain:@"ApplePackage.SAP.Core" code:result.error userInfo:nil];
-}
-#endif
-
-static NSData *APSAPNativeSign(NSData *data, NSData *hardwareID, NSData *certificate, APSAPSetupExchange exchange,
-                              NSError **error, NSString **stage) {
 #if TARGET_OS_OSX
+static NSData *APSAPDesktopSign(NSData *data, NSError **error, NSString **stage) {
     *stage = @"macOS.load";
     static void *handle;
     static dispatch_once_t once;
@@ -130,121 +116,106 @@ static NSData *APSAPNativeSign(NSData *data, NSData *hardwareID, NSData *certifi
     } @finally {
         [session closeSession];
     }
-#elif TARGET_OS_IOS && !TARGET_OS_SIMULATOR
-    *stage = @"iOS.engine-load";
-    unsigned int missing = 0;
-    APSAPCoreFunctions functions = APSAPMobileFunctions(&missing);
-    if (missing) {
-        *error = [NSError errorWithDomain:@"ApplePackage.SAP.Symbols" code:missing userInfo:nil];
-        return nil;
-    }
-    *stage = @"iOS.certificate";
-    if (![certificate isKindOfClass:[NSData class]] || certificate.length == 0 || !exchange) {
-        *error = APSAPError(@"Apple SAP setup is missing its certificate or exchange handler.");
-        return nil;
-    }
-    *stage = @"iOS.engine-init";
-    APSAPCoreResult outcome = {0};
-    APSAPCoreSession *session = APSAPCoreCreate(&functions, hardwareID.bytes, hardwareID.length, &outcome);
-    if (!session) {
-        *error = APSAPCoreFailure(outcome);
-        return nil;
-    }
-    APSAPCoreOutput output = {0};
-    @try {
-        *stage = @"iOS.exchange-request";
-        outcome = APSAPCoreExchange(session, certificate.bytes, certificate.length, &output);
-        if (outcome.error != APSAPCoreErrorNone) {
-            *error = APSAPCoreFailure(outcome);
-            return nil;
-        }
-        NSData *request = [NSData dataWithBytes:output.bytes length:output.length];
-        APSAPCoreReleaseOutput(session, &output);
-        *stage = @"iOS.setup-request";
-        dispatch_semaphore_t received = dispatch_semaphore_create(0);
-        __block NSData *reply = nil;
-        __block NSError *exchangeError = nil;
-        APSAPCompletion *setupResult = [APSAPCompletion new];
-        setupResult.lock = [NSLock new];
-        setupResult.callback = ^(NSData *value, NSError *failure) {
-            reply = value;
-            exchangeError = failure;
-            dispatch_semaphore_signal(received);
-        };
-        exchange(request, ^(NSData *value, NSError *failure) {
-            [setupResult finish:value error:failure];
-        });
-        if (dispatch_semaphore_wait(received, dispatch_time(DISPATCH_TIME_NOW, 25 * NSEC_PER_SEC)) != 0) {
-            *error = APSAPError(@"Apple SAP setup did not reply before its deadline.");
-            return nil;
-        }
-        if (exchangeError || ![reply isKindOfClass:[NSData class]] || reply.length == 0) {
-            *error = exchangeError ?: APSAPError(@"Apple SAP setup returned an empty reply.");
-            return nil;
-        }
-        *stage = @"iOS.exchange-response";
-        outcome = APSAPCoreExchange(session, reply.bytes, reply.length, &output);
-        if (outcome.error != APSAPCoreErrorNone) {
-            *error = APSAPCoreFailure(outcome);
-            return nil;
-        }
-        APSAPCoreReleaseOutput(session, &output);
-        *stage = @"iOS.sign";
-        outcome = APSAPCoreSign(session, data.bytes, data.length, &output);
-        if (outcome.error != APSAPCoreErrorNone) {
-            *error = APSAPCoreFailure(outcome);
-            return nil;
-        }
-        return [NSData dataWithBytes:output.bytes length:output.length];
-    } @finally {
-        APSAPCoreReleaseOutput(session, &output);
-        APSAPCoreDestroy(&session);
-    }
-#else
-    *error = APSAPError(@"Apple SAP signing requires a physical iOS device or macOS.");
-    return nil;
+}
 #endif
+
+#if TARGET_OS_IOS
+static void APSAPRuntimeProgress(void *context, int stage) {
+    APSAPOperation *operation = (__bridge APSAPOperation *)context;
+    [operation report:stage];
 }
 
-void APSAPSignData(NSData *data, NSData *hardwareID, NSData *certificate, APSAPSetupExchange exchange,
-                  void (^completion)(NSData *, NSError *)) {
-    // A system call cannot safely be killed after timeout. Bound outstanding
-    // native work so repeated retries cannot accumulate stuck worker threads.
+static NSString *APSAPRuntimeStage(int stage) {
+    switch (stage) {
+        case 1: return @"iOS.runtime.assets";
+        case 2: return @"iOS.runtime.load";
+        case 3: return @"iOS.runtime.initialize";
+        case 4: return @"iOS.runtime.certificate";
+        case 5: return @"iOS.runtime.exchange-request";
+        case 6: return @"iOS.runtime.setup";
+        case 7: return @"iOS.runtime.exchange-response";
+        case 8: return @"iOS.runtime.ready";
+        case 9: return @"iOS.runtime.sign";
+        case 11: return @"iOS.runtime.timeout";
+        case 12: return @"iOS.runtime.input";
+        case 13: return @"iOS.runtime.failure";
+        case 14: return @"iOS.runtime.wait";
+        default: return @"native.sign";
+    }
+}
+#endif
+
+APSAPOperation *APSAPSignData(NSData *data, NSData *hardwareID, NSString *cacheDirectory,
+                             void (^progress)(NSInteger), void (^completion)(NSData *, NSError *)) {
+    APSAPOperation *result = [APSAPOperation new];
+    result.lock = [NSLock new];
+    result.callback = completion;
+    result.progress = progress;
+    // Bound outstanding C workers, including cancelled native macOS calls.
     static dispatch_semaphore_t capacity;
     static dispatch_once_t capacityOnce;
     dispatch_once(&capacityOnce, ^{ capacity = dispatch_semaphore_create(2); });
     if (dispatch_semaphore_wait(capacity, DISPATCH_TIME_NOW) != 0) {
-        completion(nil, APSAPOperationError(@"native.capacity", nil));
-        return;
+        [result finish:nil error:APSAPOperationError(@"native.capacity", nil)];
+        return result;
     }
-    APSAPCompletion *result = [APSAPCompletion new];
-    result.lock = [NSLock new];
-    result.callback = completion;
+#if TARGET_OS_OSX
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 30 * NSEC_PER_SEC),
                    dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         [result finish:nil error:APSAPOperationError(@"native.timeout", nil)];
     });
-    // Never block the main actor. Each operation owns its session, so simultaneous
-    // accounts cannot share signing state or strand one another behind a timeout.
+#endif
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         @autoreleasepool {
             NSString *stage = @"native.sign";
+#if TARGET_OS_IOS
+            unsigned char *output = NULL;
+#endif
             @try {
+#if TARGET_OS_IOS
+                if (data.length == 0 || data.length > (1u << 20) || hardwareID.length == 0 ||
+                    hardwareID.length > 20 || !cacheDirectory.isAbsolutePath) {
+                    [result finish:nil error:APSAPOperationError(@"iOS.runtime.input", nil)];
+                    return;
+                }
+                unsigned long long identifier = AssppSAPNewOperation();
+                [result attach:identifier];
+                int phase = 12, detail = 0, length = 0;
+                int status = AssppSAPSign(identifier, (char *)cacheDirectory.fileSystemRepresentation,
+                    (unsigned char *)hardwareID.bytes, (int)hardwareID.length,
+                    (unsigned char *)data.bytes, (int)data.length, &output, &length, &phase, &detail,
+                    APSAPRuntimeProgress, (__bridge void *)result);
+                [result attach:0];
+                stage = APSAPRuntimeStage(phase);
+                if (phase == 10) {
+                    [result cancel];
+                } else if (status != 0 || !output || length <= 0 || length > (1 << 20)) {
+                    NSError *cause = [NSError errorWithDomain:@"ApplePackage.SAP.Runtime" code:detail userInfo:nil];
+                    [result finish:nil error:APSAPOperationError(stage, cause)];
+                } else {
+                    [result finish:[NSData dataWithBytes:output length:(NSUInteger)length] error:nil];
+                }
+#elif TARGET_OS_OSX
                 NSError *error = nil;
-                NSData *signature = APSAPNativeSign(data, hardwareID, certificate, exchange, &error, &stage);
+                NSData *signature = APSAPDesktopSign(data, &error, &stage);
                 if (error || ![signature isKindOfClass:[NSData class]] || signature.length == 0) {
-                    // Swift extracts only stage/domain/code. Keep the original
-                    // error internally, never its description or request data.
                     [result finish:nil error:APSAPOperationError(stage, error)];
                 } else {
                     [result finish:signature error:nil];
                 }
+#else
+                [result finish:nil error:APSAPError(@"Apple SAP signing is unavailable on this platform.")];
+#endif
             } @catch (NSException *exception) {
                 [result finish:nil error:APSAPOperationError(stage,
-                    APSAPError(@"The system Apple SAP signing interface is incompatible with this OS version."))];
+                    APSAPError(@"Apple SAP signing could not complete."))];
             } @finally {
+#if TARGET_OS_IOS
+                AssppSAPFree(output);
+#endif
                 dispatch_semaphore_signal(capacity);
             }
         }
     });
+    return result;
 }
