@@ -208,6 +208,17 @@ jobs:
           done
           xcodebuild -version
 
+      - name: Set up SAP build toolchain for fork builds
+        if: ${{ hashFiles('source/Packages/SAPRuntime/go.mod') != '' }}
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.6'
+          cache-dependency-path: source/Packages/SAPRuntime/go.sum
+
+      - name: Ensure CMake is available for fork builds
+        if: ${{ hashFiles('source/Packages/SAPRuntime/go.mod') != '' }}
+        run: command -v cmake || brew install cmake
+
       - name: Install signing assets
         id: signing
         env:
@@ -389,6 +400,10 @@ jobs:
           cp "${IPA_PATH}" "${NAMED_IPA}"
           echo "ipa_path=${NAMED_IPA}" >> "$GITHUB_OUTPUT"
 
+      - name: Package SAP corresponding source for fork builds
+        if: ${{ hashFiles('source/Packages/SAPRuntime/go.mod') != '' }}
+        run: source/Packages/SAPRuntime/Scripts/package-sources.sh "${RUNNER_TEMP}/Asspp-sources.tar.gz"
+
       - name: Create release assets
         id: assets
         env:
@@ -522,6 +537,11 @@ jobs:
             "${INSTALL_PATH}#${INSTALL_NAME}" \
             --repo "${GITHUB_REPOSITORY}" \
             --clobber
+
+          if [ -f "${RUNNER_TEMP}/Asspp-sources.tar.gz" ]; then
+            gh release upload "${TAG_NAME}" "${RUNNER_TEMP}/Asspp-sources.tar.gz" \
+              --repo "${GITHUB_REPOSITORY}" --clobber
+          fi
 
           echo "release_url=https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG_NAME}" >> "$GITHUB_OUTPUT"
 

@@ -3,88 +3,79 @@ name: Release
 on:
   push:
     tags:
-      - "*"
+      - "v[0-9]*"
 
 permissions:
   contents: write
+  actions: read
 
 concurrency:
   group: release-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   release:
-    runs-on: macos-26
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
 
     steps:
-      - name: Checkout
+      - name: Checkout tagged source
         uses: actions/checkout@v4
 
-      - name: Select newest non-beta Xcode
+      # Ship the exact artifacts that passed both platform jobs on main. A tag
+      # without a successful main build fails before creating a public release.
+      - name: Download verified build artifacts
         run: |
           set -euo pipefail
-          best_path=""
-          best_ver=""
-          for app in /Applications/Xcode*.app; do
-            [ -d "$app" ] || continue
-            info="$app/Contents/Info.plist"
-            [ -f "$info" ] || continue
-            # Skip beta/release-candidate installs.
-            case "$(printf '%s' "$app" | tr '[:upper:]' '[:lower:]')" in
-              *beta*|*_rc*) continue ;;
-            esac
-            ver="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$info" 2>/dev/null || true)"
-            [ -n "$ver" ] || continue
-            if [ -z "$best_ver" ] || [ "$(printf '%s\n%s\n' "$best_ver" "$ver" | sort -V | tail -1)" = "$ver" ]; then
-              best_ver="$ver"
-              best_path="$app"
-            fi
-          done
-          if [ -z "$best_path" ]; then
-            echo "::error::No non-beta Xcode found"
+          source_commit="$(git rev-parse HEAD)"
+          run_id="$(gh api --method GET \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/build.yml/runs" \
+            -f head_sha="$source_commit" -f branch=main -f event=push \
+            -f status=success -f per_page=1 --jq '.workflow_runs[0].id // empty')"
+          if [ -z "$run_id" ]; then
+            echo '::error::This tag has no successful Build App run on main. Wait for CI before tagging.'
             exit 1
           fi
-          echo "Selected Xcode $best_ver at $best_path"
-          sudo xcode-select -s "$best_path"
-          xcodebuild -version
+          gh run download "$run_id" --repo "$GITHUB_REPOSITORY" \
+            --name Asspp.ipa --name Asspp.zip --name Asspp-sources \
+            --dir "${RUNNER_TEMP}/verified-build"
+          mkdir -p "${RUNNER_TEMP}/release"
+          cp "${RUNNER_TEMP}/verified-build/Asspp.ipa/Asspp.ipa" "${RUNNER_TEMP}/release/"
+          cp "${RUNNER_TEMP}/verified-build/Asspp.zip/Asspp.zip" "${RUNNER_TEMP}/release/"
+          cp "${RUNNER_TEMP}/verified-build/Asspp-sources/Asspp-sources.tar.gz" "${RUNNER_TEMP}/release/"
+          echo "SOURCE_COMMIT=$source_commit" >> "$GITHUB_ENV"
+          echo "BUILD_RUN_ID=$run_id" >> "$GITHUB_ENV"
 
-      - name: Ensure iOS platform is installed
-        run: xcodebuild -downloadPlatform iOS || true
-
-      - name: Install Procursus
-        uses: dhinakg/procursus-action@main
-        with:
-          packages: ldid findutils sed coreutils make
-
-      # Output artifacts outside the repo: both compile scripts begin with
-      # `git clean -fdx`, so an artifact left in the working tree would be
-      # deleted by the next build step.
-      - name: Build iOS package
-        run: |
-          chmod +x Resources/Scripts/compile.release.mobile.ci.sh
-          ./Resources/Scripts/compile.release.mobile.ci.sh "$(pwd)" "${RUNNER_TEMP}/Asspp.ipa"
-
-      - name: Build macOS package
-        run: |
-          chmod +x Resources/Scripts/compile.release.osx.sh
-          ./Resources/Scripts/compile.release.osx.sh "$(pwd)" "${RUNNER_TEMP}/Asspp.zip"
-
-      - name: Create GitHub release
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Validate release identity and corresponding source
         run: |
           set -euo pipefail
-          gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1 || \
-            gh release create "${GITHUB_REF_NAME}" \
-              --title "${GITHUB_REF_NAME}" \
-              --notes "Release ${GITHUB_REF_NAME}"
+          python3 Resources/Scripts/validate-release.py "${RUNNER_TEMP}/release" \
+            --tag "$GITHUB_REF_NAME" --commit "$SOURCE_COMMIT"
+          version="${GITHUB_REF_NAME#v}"
+          cp "Resources/ReleaseNotes/${version}.md" "${RUNNER_TEMP}/release-notes.md"
+          printf '\nBuild verification: https://github.com/%s/actions/runs/%s\nSource commit: %s\n' \
+            "$GITHUB_REPOSITORY" "$BUILD_RUN_ID" "$SOURCE_COMMIT" >> "${RUNNER_TEMP}/release-notes.md"
 
-      - name: Upload release artifacts
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Upload and publish release
         run: |
           set -euo pipefail
-          gh release upload "${GITHUB_REF_NAME}" \
-            "${RUNNER_TEMP}/Asspp.ipa" \
-            "${RUNNER_TEMP}/Asspp.zip" \
-            --clobber
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            is_draft="$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)"
+            if [ "$is_draft" != true ]; then
+              echo '::error::Refusing to overwrite an already published release.'
+              exit 1
+            fi
+          else
+            gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag \
+              --title "Asspp ${GITHUB_REF_NAME#v}" --draft \
+              --notes-file "${RUNNER_TEMP}/release-notes.md"
+          fi
+          gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+            "${RUNNER_TEMP}/release/Asspp.ipa" \
+            "${RUNNER_TEMP}/release/Asspp.zip" \
+            "${RUNNER_TEMP}/release/Asspp-sources.tar.gz" \
+            "${RUNNER_TEMP}/release/SHA256SUMS" --clobber
+          gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+            --title "Asspp ${GITHUB_REF_NAME#v}" --notes-file "${RUNNER_TEMP}/release-notes.md" \
+            --draft=false --latest

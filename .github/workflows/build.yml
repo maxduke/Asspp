@@ -80,17 +80,13 @@ jobs:
           path: Asspp.ipa
 
       - name: Package corresponding sources
-        run: |
-          mkdir -p "${RUNNER_TEMP}/asspp-sources"
-          git archive HEAD | tar -x -C "${RUNNER_TEMP}/asspp-sources"
-          cp -R .build/SAPRuntime/source/unicorn-engine-sys-tci "${RUNNER_TEMP}/asspp-sources/Packages/SAPRuntime/UnicornTCISource"
-          tar -czf Asspp-sources.tar.gz -C "${RUNNER_TEMP}" asspp-sources
+        run: Packages/SAPRuntime/Scripts/package-sources.sh "${RUNNER_TEMP}/Asspp-sources.tar.gz"
 
       - name: Upload corresponding sources
         uses: actions/upload-artifact@v4
         with:
           name: Asspp-sources
-          path: Asspp-sources.tar.gz
+          path: ${{ runner.temp }}/Asspp-sources.tar.gz
 
   build-osx:
     runs-on: macos-26
@@ -134,6 +130,9 @@ jobs:
 
       - name: Check native SAP bridge against Apple SDKs
         run: Packages/ApplePackage/Scripts/check-native-sap.sh
+
+      - name: Test release artifact validation
+        run: python3 -m unittest discover -s Resources/Tests -v
 
       - name: Test App Store protocol recovery
         run: swift test --package-path Packages/ApplePackage

@@ -77,7 +77,7 @@ macOS, device iOS and simulator SDKs. The iOS CI job additionally builds the
 statically linked interpreter, runs its source/concurrency/C ABI tests, and
 performs live Apple setup with two synthetic binary payloads before building the
 IPA. None of these tests needs an Apple Account. The simulator build supports
-ARM64; device account verification remains necessary.
+ARM64. Device validation results and their scope are recorded below.
 
 Previous device results on iOS 27.0.1 inside LiveContainer:
 
@@ -92,9 +92,9 @@ Previous device results on iOS 27.0.1 inside LiveContainer:
 Those iOS paths have been removed. During development, both upstream Unicorn
 and the source-built TCI interpreter completed real Apple setup and produced
 distinct signatures for two test payloads. The warm TCI probe took about 2.3
-seconds. This verifies the protocol and interpreter, not account login on a
-physical iPhone. Validate adding an account, 2FA and token rotation inside
-LiveContainer, then check a second account and a download before release.
+seconds. The tester subsequently confirmed account login on a physical iPhone running
+iOS 27.0.1 inside LiveContainer on October 18, 2026. Other OS versions, installation
+methods, 2FA flows and token-rotation scenarios are not established by that report.
 
 ipatool source is MIT licensed. The new interpreter includes GPL-2.0 code; the
 app bundles the notices and CI publishes the corresponding source beside the

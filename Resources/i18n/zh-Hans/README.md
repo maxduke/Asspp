@@ -28,12 +28,15 @@ Fork 本仓库并配置 GitHub Actions，使用你自己的开发者证书自动
 
 #### 方案二：手动安装
 
-1.  前往 [Releases](https://github.com/Lakr233/Asspp/releases) 下载最新的 `.ipa` 文件。
+1.  前往 [Releases](https://github.com/maxduke/Asspp/releases) 下载最新的 `.ipa` 文件。
 2.  使用你习惯的签名工具（如 SideStore, AltStore, TrollStore, 巨魔等）进行签名安装。
+
+iOS 首次登录会从 Apple 下载约 125 MB 的 SAP 组件并在本机缓存，准备过程中会显示提示并支持取消。
+已在 iOS 27.0.1 的 LiveContainer 中验证登录成功。
 
 ### macOS
 
-1.  前往 [Releases](https://github.com/Lakr233/Asspp/releases) 下载最新的 `.zip` 文件。
+1.  前往 [Releases](https://github.com/maxduke/Asspp/releases) 下载最新的 `.zip` 文件。
 2.  解压并将 `Asspp.app` 拖入“应用程序”文件夹。
 3.  **首次运行与信任应用（推荐步骤）**：
     1.  尝试双击打开应用；若出现“无法打开，因为无法确认开发者”或类似提示：
@@ -77,7 +80,9 @@ _`ipatool-ios` 和 `localhost.direct` 已在当前项目中不再使用。_
 
 ## 📄 许可证
 
-MIT License. 详见 [LICENSE](../../../LICENSE)。
+源代码文件保留原有 [MIT 许可](../../../LICENSE)。iOS 版本包含采用 GPL-2.0 许可的 Unicorn TCI，
+详见[运行时许可说明](../../../Packages/SAPRuntime/README.md#licenses-and-corresponding-source)。
+每次发布均附带 `Asspp-sources.tar.gz`，包含对应源码和构建说明。
 
 ---
 

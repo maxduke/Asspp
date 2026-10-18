@@ -132,3 +132,7 @@ Foundation/ApplePackage/
 
 # Standalone library tests; app dependencies are pinned by the workspace.
 Packages/ApplePackage/Package.resolved
+
+# Python release validation caches
+__pycache__/
+*.pyc

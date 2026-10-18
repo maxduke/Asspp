@@ -61,8 +61,9 @@ The latter runs on Apple Silicon in the iOS CI job, before the device app build.
 The macOS probe is ad-hoc signed with the hardened runtime and no JIT entitlement.
 It tests the same statically linked interpreter and ABI that iOS uses. Linux
 upstream and TCI probes passed real Apple setup and two distinct signatures;
-the cached TCI probe took about 2.3 seconds. Device login, 2FA and account rotation
-inside LiveContainer remain a separate validation gate.
+the cached TCI probe took about 2.3 seconds. Account login was confirmed on a
+physical iPhone running iOS 27.0.1 inside LiveContainer on October 18, 2026. This report does not cover every OS version,
+installation method, 2FA flow or account-rotation scenario.
 
 ## Licenses and corresponding source
 
@@ -71,6 +72,7 @@ Unicorn TCI includes GPL-2.0 code; its license is in
 `Licenses/Unicorn-GPL-2.0.txt`. The iOS combined build is distributed under those
 GPL-2.0 terms, while individual MIT source files retain their notices. Existing
 root source-file licenses are unchanged. A notice and license copies are bundled
-in the app. CI provides an `Asspp-sources` artifact beside the IPA containing the
+in the app. CI provides an `Asspp-sources` artifact beside the IPA, and tagged releases
+include `Asspp-sources.tar.gz`, containing the
 exact app sources, build scripts, dependency pins, and patched Unicorn TCI source.
 All Go dependency versions and checksums are recorded in `go.mod` and `go.sum`.

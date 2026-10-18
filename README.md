@@ -28,12 +28,16 @@ Fork this repository to automatically build and sign the app with your own devel
 
 #### Option 2: Manual Install
 
-1.  Download the latest `.ipa` from [Releases](https://github.com/Lakr233/Asspp/releases).
+1.  Download the latest `.ipa` from [Releases](https://github.com/maxduke/Asspp/releases).
 2.  Sign and install using your preferred tool (e.g., SideStore, AltStore, TrollStore, or other signing service).
+
+The first iOS sign-in downloads about 125 MB of Apple SAP components from
+Apple and caches them locally. Preparation displays progress and can be cancelled.
+Login has been verified on iOS 27.0.1 inside LiveContainer.
 
 ### macOS
 
-1.  Download the latest `.zip` from [Releases](https://github.com/Lakr233/Asspp/releases).
+1.  Download the latest `.zip` from [Releases](https://github.com/maxduke/Asspp/releases).
 2.  Unzip and move `Asspp.app` to your Applications folder.
 3.  **First Run and Trusting the App (Recommended)**:
     1.  Try double-clicking to open the app. If you see "App can’t be opened because the developer cannot be verified" or a similar message:
@@ -77,7 +81,9 @@ _`ipatool-ios` and `localhost.direct` are no longer used in the project._
 
 ## 📄 License
 
-MIT License. See [LICENSE](./LICENSE) for details.
+Source files retain their [MIT license](./LICENSE). The iOS build includes
+Unicorn TCI under GPL-2.0; see [runtime licensing](./Packages/SAPRuntime/README.md#licenses-and-corresponding-source).
+Each release includes `Asspp-sources.tar.gz` with the corresponding source and build instructions.
 
 ## Sponsor
 

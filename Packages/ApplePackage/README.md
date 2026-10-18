@@ -52,9 +52,10 @@ on the target Apple devices before release.
 The three previous native iOS approaches failed on iOS 27.0.1 in LiveContainer;
 all five raw SAP exports were unavailable in the last build. Those paths are
 removed. The source-built interpreter has completed real Apple setup and signed
-test payloads without credentials; LiveContainer account login still requires
-physical-device validation. iOS builds now require Go 1.26.6 and CMake. The
-interpreter includes GPL-2.0 code; notices and corresponding source accompany
+test payloads without credentials. Account login was subsequently confirmed on a
+physical iPhone running iOS 27.0.1 inside LiveContainer; other runtime scenarios
+still need validation. iOS builds now require Go 1.26.6 and CMake. The interpreter
+includes GPL-2.0 code; notices and corresponding source accompany
 the IPA, with existing MIT source-file notices retained.
 
 The October 1 ipatool `ent/download` / kbsync generator is not ported: it depends

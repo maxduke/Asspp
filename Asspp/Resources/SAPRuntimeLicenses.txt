@@ -2,7 +2,7 @@ Asspp iOS SAP runtime
 
 This iOS build includes the Unicorn TCI interpreter under GNU GPL version 2.
 Corresponding source accompanies the IPA in the Asspp-sources artifact at:
-https://github.com/maxduke/Asspp/actions
+https://github.com/maxduke/Asspp/releases
 Source pins, local changes and build instructions: Packages/SAPRuntime/README.md
 No proprietary Apple framework binaries are bundled in the app.
 

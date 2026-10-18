@@ -16,7 +16,7 @@ link_flags=(-lpthread -lm)
 if [ "$(uname -s)" = Darwin ]; then
     link_flags+=(-framework CoreFoundation -framework Security -lresolv)
 fi
-cc -Wall -Wextra -Werror -I "$repository_root/Packages/ApplePackage/Sources/AppleSAP/include" \
+cc -Wall -Wextra -Werror -I "$repository_root/Packages/ApplePackage/Sources/AppleSAP" \
     "$runtime_root/Tests/bridge-smoke.c" "$output_root/host/libAssppSAPRuntime.a" \
     "$output_root/host/libunicorn.a" "${link_flags[@]}" -o "$output_root/host/bridge-smoke"
 if [ "$(uname -s)" = Darwin ]; then
