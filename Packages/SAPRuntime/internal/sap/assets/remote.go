@@ -66,23 +66,27 @@ func resolveRemoteImage(ctx context.Context) (Bundle, error) {
 		return Bundle{}, fmt.Errorf("extract AppleMediaServices from macOS %s (%s): %w", macOSVersion, macOSBuild, err)
 	}
 
-	files := make(map[string][]byte, len(requiredFiles))
+	return readExtractedAssets(ctx, frameworkDirectory, requiredFiles)
+}
 
-	for _, spec := range requiredFiles {
-		data, err := os.ReadFile(filepath.Join(frameworkDirectory, spec.name))
+func readExtractedAssets(ctx context.Context, directory string, specs []fileSpec) (Bundle, error) {
+	files := make(map[string][]byte, len(specs))
+	for _, spec := range specs {
+		if err := ctx.Err(); err != nil {
+			return Bundle{}, err
+		}
+		data, err := readCacheFile(filepath.Join(directory, spec.name), spec.source().size)
 		if err != nil {
 			return Bundle{}, fmt.Errorf("read extracted %s: %w", spec.name, err)
 		}
 
-		files[spec.name] = data
+		files[spec.name], err = compactSource(data, spec)
+		if err != nil {
+			return Bundle{}, err
+		}
 	}
 
-	bundle := bundleFrom(files)
-	if err := validate(bundle); err != nil {
-		return Bundle{}, err
-	}
-
-	return bundle, nil
+	return bundleFrom(files), ctx.Err()
 }
 
 func extractAppleMediaServices(ctx context.Context, client *http.Client, remote *remoteFile, entry *zip.File, destination string) error {

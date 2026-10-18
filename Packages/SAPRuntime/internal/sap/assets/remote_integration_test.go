@@ -34,6 +34,7 @@ var _ = Describe("macOS 27 remote framework extraction", Label("integration"), f
 		Expect(extractFrameworkFiles(ctx, client, remote, entry, destination)).To(Succeed())
 
 		for _, spec := range requiredFiles[1:] {
+			spec = spec.source()
 			data, err := os.ReadFile(filepath.Join(destination, spec.name))
 			Expect(err).NotTo(HaveOccurred(), spec.name)
 			Expect(data).To(HaveLen(spec.size), spec.name)
