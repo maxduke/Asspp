@@ -14,5 +14,10 @@ for platform in macosx iphoneos iphonesimulator; do
         -Wall -Wextra -Werror -Wno-unused-parameter \
         -target "$target" -isysroot "$sdk_path" \
         -I "$package_root/Sources/AppleSAP/include" \
+        -I "$package_root/Sources/AppleSAPCore/include" \
         "$package_root/Sources/AppleSAP/AppleSAP.m"
+    xcrun --sdk "$platform" clang -fsyntax-only -Wall -Wextra -Werror \
+        -target "$target" -isysroot "$sdk_path" \
+        -I "$package_root/Sources/AppleSAPCore/include" \
+        "$package_root/Sources/AppleSAPCore/AppleSAPCore.c"
 done

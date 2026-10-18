@@ -12,6 +12,7 @@ typedef void (^APSAPSetupExchange)(
 /// The completion runs once, including when the system service times out.
 FOUNDATION_EXPORT void APSAPSignData(
     NSData *data,
+    NSData * _Nullable hardwareID,
     NSData * _Nullable certificate,
     APSAPSetupExchange _Nullable exchange,
     void (^completion)(NSData * _Nullable signature, NSError * _Nullable error)

@@ -48,10 +48,25 @@ final class SAPDiagnosticTests: XCTestCase {
     }
 
     func testExplicitSetupFailuresRetainTheirStage() {
-        for stage in ["iOS.certificate", "iOS.context-init", "iOS.exchange-request", "iOS.setup-request", "iOS.exchange-response"] {
+        for stage in ["iOS.certificate", "iOS.context-init", "iOS.engine-load", "iOS.engine-init", "iOS.exchange-request", "iOS.setup-request", "iOS.exchange-response"] {
             let failure = SAPSigner.operationError(stage: stage, cause: NSError(domain: "SSErrorDomain", code: 122))
             let message = SAPSigner.diagnosticError(failure).localizedDescription
             XCTAssertTrue(message.contains("\(stage); ApplePackage.SAP/2 -> SSErrorDomain/122"))
+        }
+    }
+
+    func testDirectEngineFailuresPreserveOnlyAllowedNumericCodes() {
+        for (stage, domain, code) in [
+            ("iOS.engine-load", "ApplePackage.SAP.Symbols", 31),
+            ("iOS.engine-init", "ApplePackage.SAP.Native", -42001),
+            ("iOS.engine-init", "ApplePackage.SAP.Core", 4),
+        ] {
+            let failure = SAPSigner.operationError(stage: stage, cause: NSError(domain: domain, code: code, userInfo: [
+                NSLocalizedDescriptionKey: "fixture-secret",
+            ]))
+            let message = SAPSigner.diagnosticError(failure).localizedDescription
+            XCTAssertTrue(message.contains("\(stage); ApplePackage.SAP/2 -> \(domain)/\(code)"))
+            XCTAssertFalse(message.contains("fixture-secret"))
         }
     }
 }

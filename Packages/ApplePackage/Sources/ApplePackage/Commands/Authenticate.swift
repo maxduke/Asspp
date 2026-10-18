@@ -12,12 +12,16 @@ public enum Authenticator {
     ) async throws -> Account {
         // Validate user input before touching either the Store or native signer.
         let code = try AuthenticationProtocol.normalizedCode(code)
+        let guid = Configuration.deviceIdentifier
         let bag = try await Bag.fetchBag()
         let client = Configuration.makeHTTPClient(redirectConfiguration: .disallow)
         defer { _ = client.shutdown() }
         return try await authenticate(
             email: email, password: password, code: code, cookies: cookies,
-            guid: Configuration.deviceIdentifier, bag: bag, sign: SAPSigner.sign,
+            guid: guid, bag: bag,
+            sign: { body, signingBag in
+                try await SAPSigner.sign(body, bag: signingBag, guid: guid)
+            },
             send: { request in
                 try await client.execute(request: request, deadline: .now() + .seconds(Configuration.timeoutRead)).get()
             }
