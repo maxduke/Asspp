@@ -65,6 +65,7 @@ extension Downloads {
                 account: &account.account,
                 app: package.software,
                 externalVersionID: package.externalVersionID,
+                entityType: package.entityType,
             )
             let request = try Downloads.this.add(request: .init(
                 account: account,

@@ -75,7 +75,7 @@ SwiftUI views organized by feature: Account, Search, Download, Installed (macOS 
 
 ## Dependencies (SPM via Xcode)
 
-- **ApplePackage** (remote) — App Store protocol, IPA handling
+- **ApplePackage** (local fork in `Packages/ApplePackage`) — App Store protocol, IPA handling; see the package README for upstream provenance and compatibility changes
 - **Vapor** — HTTPS server for iOS OTA installation
 - **Digger** — Download manager with progress/speed tracking
 - **Kingfisher** — Async image loading

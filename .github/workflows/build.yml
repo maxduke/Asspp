@@ -101,6 +101,12 @@ jobs:
         with:
           packages: ldid findutils sed coreutils make
 
+      - name: Check native SAP bridge against Apple SDKs
+        run: Packages/ApplePackage/Scripts/check-native-sap.sh
+
+      - name: Test App Store protocol recovery
+        run: swift test --package-path Packages/ApplePackage
+
       - name: Build
         run: |
           chmod +x Resources/Scripts/compile.release.osx.sh

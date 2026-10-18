@@ -153,7 +153,7 @@
                 )
             }
             var updatedApp = app.info
-            updatedApp.package = .init(software: latest)
+            updatedApp.package = .init(software: latest, entityType: updatedApp.package.entityType ?? .iPhone)
             var request = await Downloads.this.downloadRequest(forArchive: updatedApp.package)
             if request == nil {
                 try await Downloads.this.startDownload(for: updatedApp.package, accountID: updatedApp.accountID)

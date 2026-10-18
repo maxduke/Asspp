@@ -178,7 +178,7 @@
 				80CD64EB2C42AA2C0073E206 /* XCRemoteSwiftPackageReference "KeychainAccess" */,
 				50D262922E77D63B00FF8813 /* XCRemoteSwiftPackageReference "swift-log" */,
 				507974612E784D4E0016F540 /* XCRemoteSwiftPackageReference "Digger" */,
-				50ABFB102F48A6D60077DE1A /* XCRemoteSwiftPackageReference "ApplePackage" */,
+				50ABFB102F48A6D60077DE1A /* XCLocalSwiftPackageReference "ApplePackage" */,
 				50ABFE1D2F48AAE50077DE1A /* XCRemoteSwiftPackageReference "ButtonKit" */,
 				82E7AE7277E13A750B401DE9 /* XCRemoteSwiftPackageReference "LookInside-Release" */,
 			);
@@ -401,6 +401,13 @@
 		};
 /* End XCConfigurationList section */
 
+/* Begin XCLocalSwiftPackageReference section */
+		50ABFB102F48A6D60077DE1A /* XCLocalSwiftPackageReference "ApplePackage" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/ApplePackage;
+		};
+/* End XCLocalSwiftPackageReference section */
+
 /* Begin XCRemoteSwiftPackageReference section */
 		507974612E784D4E0016F540 /* XCRemoteSwiftPackageReference "Digger" */ = {
 			isa = XCRemoteSwiftPackageReference;
@@ -408,14 +415,6 @@
 			requirement = {
 				kind = upToNextMajorVersion;
 				minimumVersion = 0.0.5;
-			};
-		};
-		50ABFB102F48A6D60077DE1A /* XCRemoteSwiftPackageReference "ApplePackage" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/Lakr233/ApplePackage";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 1.2.7;
 			};
 		};
 		50ABFE1D2F48AAE50077DE1A /* XCRemoteSwiftPackageReference "ButtonKit" */ = {
@@ -508,7 +507,7 @@
 		};
 		50ABFB112F48A6D60077DE1A /* ApplePackage */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 50ABFB102F48A6D60077DE1A /* XCRemoteSwiftPackageReference "ApplePackage" */;
+			package = 50ABFB102F48A6D60077DE1A /* XCLocalSwiftPackageReference "ApplePackage" */;
 			productName = ApplePackage;
 		};
 		50ABFE1E2F48AAE50077DE1A /* ButtonKit */ = {
