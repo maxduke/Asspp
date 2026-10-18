@@ -30,6 +30,15 @@ static NSError *APSAPError(NSString *message) {
                           userInfo:@{NSLocalizedDescriptionKey: message}];
 }
 
+static NSError *APSAPOperationError(NSString *stage, NSError *cause) {
+    NSMutableDictionary *info = [@{
+        NSLocalizedDescriptionKey: @"Apple SAP could not sign the login request.",
+        @"ApplePackageSAPStage": stage,
+    } mutableCopy];
+    if (cause) info[NSUnderlyingErrorKey] = cause;
+    return [NSError errorWithDomain:@"ApplePackage.SAP" code:2 userInfo:info];
+}
+
 // A timeout can race with the native callback. Keeping completion ownership in a
 // locked object guarantees exactly one Swift continuation resume. A late native
 // result is discarded; its session still follows the normal cleanup path.
@@ -49,8 +58,9 @@ static NSError *APSAPError(NSString *message) {
 }
 @end
 
-static NSData *APSAPNativeSign(NSData *data, NSDictionary *bag, NSError **error) {
+static NSData *APSAPNativeSign(NSData *data, NSDictionary *bag, NSError **error, NSString **stage) {
 #if TARGET_OS_OSX
+    *stage = @"macOS.load";
     static void *handle;
     static dispatch_once_t once;
     dispatch_once(&once, ^{
@@ -65,12 +75,14 @@ static NSData *APSAPNativeSign(NSData *data, NSDictionary *bag, NSError **error)
         *error = APSAPError(@"Apple SAP signing is unavailable on this macOS version.");
         return nil;
     }
+    *stage = @"macOS.create-session";
     APSAPDesktopSession *session = [(APSAPDesktopSession *)[cls alloc] initWithStoreClient:nil];
     if (!session) {
         *error = APSAPError(@"Could not create the Apple SAP signing session.");
         return nil;
     }
     @try {
+        *stage = @"macOS.open-session";
         dispatch_semaphore_t opened = dispatch_semaphore_create(0);
         [session openSessionWithCompletionHandler:^{ dispatch_semaphore_signal(opened); }];
         if (dispatch_semaphore_wait(opened, dispatch_time(DISPATCH_TIME_NOW, 25 * NSEC_PER_SEC)) != 0 ||
@@ -78,11 +90,13 @@ static NSData *APSAPNativeSign(NSData *data, NSDictionary *bag, NSError **error)
             *error = APSAPError(@"The Apple SAP signing service did not open a session. Try again later.");
             return nil;
         }
+        *stage = @"macOS.sign";
         return [session signData:data error:error];
     } @finally {
         [session closeSession];
     }
 #elif TARGET_OS_IOS && !TARGET_OS_SIMULATOR
+    *stage = @"iOS.load";
     static void *handle;
     static dispatch_once_t once;
     dispatch_once(&once, ^{
@@ -96,11 +110,13 @@ static NSData *APSAPNativeSign(NSData *data, NSDictionary *bag, NSError **error)
         *error = APSAPError(@"Apple SAP signing is unavailable on this iOS version. Login requires a supported physical device.");
         return nil;
     }
+    *stage = @"iOS.create-session";
     APSAPMobileSession *session = [(APSAPMobileSession *)[cls alloc] initWithURLBagDictionary:bag SAPVersion:200];
     if (!session) {
         *error = APSAPError(@"Could not create the Apple SAP signing session.");
         return nil;
     }
+    *stage = @"iOS.validate-bag";
     APSAPBagInterpreter *interpreter = [session urlBagInterpreter];
     if ([session SAPVersion] != 200 ||
         ![interpreter respondsToSelector:@selector(mescalSetupURL)] ||
@@ -110,6 +126,7 @@ static NSData *APSAPNativeSign(NSData *data, NSDictionary *bag, NSError **error)
         *error = APSAPError(@"The system SAP signer could not use the Apple Store signing configuration.");
         return nil;
     }
+    *stage = @"iOS.sign";
     return [session signatureWithData:data error:error];
 #else
     *error = APSAPError(@"Apple SAP signing requires a physical iOS device or macOS.");
@@ -125,7 +142,7 @@ void APSAPSignData(NSData *data, NSDictionary<NSString *, id> *URLBag,
     static dispatch_once_t capacityOnce;
     dispatch_once(&capacityOnce, ^{ capacity = dispatch_semaphore_create(2); });
     if (dispatch_semaphore_wait(capacity, DISPATCH_TIME_NOW) != 0) {
-        completion(nil, APSAPError(@"Apple SAP signing is busy. Wait for the current sign-in to finish and try again."));
+        completion(nil, APSAPOperationError(@"native.capacity", nil));
         return;
     }
     APSAPCompletion *result = [APSAPCompletion new];
@@ -133,25 +150,26 @@ void APSAPSignData(NSData *data, NSDictionary<NSString *, id> *URLBag,
     result.callback = completion;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 30 * NSEC_PER_SEC),
                    dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-        [result finish:nil error:APSAPError(@"Apple SAP signing timed out. Try again later.")];
+        [result finish:nil error:APSAPOperationError(@"native.timeout", nil)];
     });
     // Never block the main actor. Each operation owns its session, so simultaneous
     // accounts cannot share signing state or strand one another behind a timeout.
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         @autoreleasepool {
+            NSString *stage = @"native.sign";
             @try {
                 NSError *error = nil;
-                NSData *signature = APSAPNativeSign(data, URLBag, &error);
+                NSData *signature = APSAPNativeSign(data, URLBag, &error, &stage);
                 if (error || ![signature isKindOfClass:[NSData class]] || signature.length == 0) {
-                    // System errors may embed request details. Never surface them
-                    // through the application's login-error logger.
-                    [result finish:nil error:[error.domain isEqualToString:@"ApplePackage.SAP"] ? error :
-                        APSAPError(@"Apple SAP could not sign the login request. The system service may be unavailable or restricted on this device.")];
+                    // Swift extracts only stage/domain/code. Keep the original
+                    // error internally, never its description or request data.
+                    [result finish:nil error:APSAPOperationError(stage, error)];
                 } else {
                     [result finish:signature error:nil];
                 }
             } @catch (NSException *exception) {
-                [result finish:nil error:APSAPError(@"The system Apple SAP signing interface is incompatible with this OS version.")];
+                [result finish:nil error:APSAPOperationError(stage,
+                    APSAPError(@"The system Apple SAP signing interface is incompatible with this OS version."))];
             } @finally {
                 dispatch_semaphore_signal(capacity);
             }

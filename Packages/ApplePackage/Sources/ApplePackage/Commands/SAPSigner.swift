@@ -39,7 +39,7 @@ enum SAPSigner {
         let signature: Data = try await withCheckedThrowingContinuation { continuation in
             APSAPSignData(body, bag) { signature, error in
                 if let error {
-                    continuation.resume(throwing: error)
+                    continuation.resume(throwing: diagnosticError(error as NSError))
                 } else if let signature, !signature.isEmpty {
                     continuation.resume(returning: signature)
                 } else {
@@ -52,5 +52,35 @@ enum SAPSigner {
         #else
         throw AuthenticationProtocol.ProtocolError("Apple SAP signing requires a physical iOS device or macOS.")
         #endif
+    }
+
+    /// Only fixed diagnostic metadata crosses the UI/logging boundary. Native
+    /// descriptions, URLs and userInfo can contain the signed login payload.
+    static func diagnosticError(_ error: NSError) -> AuthenticationProtocol.ProtocolError {
+        let stages: Set<String> = [
+            "native.sign", "native.capacity", "native.timeout",
+            "iOS.load", "iOS.create-session", "iOS.validate-bag", "iOS.sign",
+            "macOS.load", "macOS.create-session", "macOS.open-session", "macOS.sign",
+        ]
+        let reportedStage = error.userInfo["ApplePackageSAPStage"] as? String ?? "native.sign"
+        let stage = stages.contains(reportedStage) ? reportedStage : "native.sign"
+        let domains: Set<String> = [
+            "ApplePackage.SAP", "SSErrorDomain", "SSVErrorDomain", "AMSErrorDomain", "ASDErrorDomain",
+            NSURLErrorDomain, NSCocoaErrorDomain, NSOSStatusErrorDomain,
+            "kCFErrorDomainCFNetwork", "kCFErrorDomainOSStatus", "AKAuthenticationError",
+        ]
+        var codes: [String] = []
+        var current: NSError? = error
+        var visited: Set<ObjectIdentifier> = []
+        while let cause = current, codes.count < 4, visited.insert(ObjectIdentifier(cause)).inserted {
+            let domain = domains.contains(cause.domain) ? cause.domain : "System"
+            codes.append("\(domain)/\(cause.code)")
+            current = cause.userInfo[NSUnderlyingErrorKey] as? NSError
+        }
+        let version = ProcessInfo.processInfo.operatingSystemVersion
+        let systemVersion = "\(version.majorVersion).\(version.minorVersion).\(version.patchVersion)"
+        return AuthenticationProtocol.ProtocolError(
+            "Apple SAP signing failed [\(stage); \(codes.joined(separator: " -> ")); OS \(systemVersion)]."
+        )
     }
 }

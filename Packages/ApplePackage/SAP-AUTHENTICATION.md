@@ -46,6 +46,9 @@ the existing `Strings.authRequiresVerificationCode` UI contract.
   it cannot forcibly terminate a blocked OS signing operation. At most two
   native operations may remain outstanding; further requests fail as busy. Its worker and
   session remain alive until that call returns.
+- Native failures expose the signing stage, up to four allowlisted NSError
+  domains with numeric codes, and the OS version. Error descriptions, URLs,
+  userInfo, request bytes and account credentials never enter the UI or log.
 - Linux and the iOS simulator cannot supply the native signer. Fixture tests use
   an internal injectable signer and HTTP sender; production has no unsigned or
   synthetic-signature fallback.
@@ -75,11 +78,17 @@ Device testing must additionally build through `Asspp.xcworkspace`, sign in with
 a test account on macOS and a physical iOS device, complete 2FA, and rotate that
 account's token. Verify an existing second account remains usable.
 
-**Runtime compatibility is not established by Linux fixture tests.** These are
-private system APIs. Current OS versions may remove the selectors, restrict their
-services, or require different device identity behavior. In particular, the iOS
-header establishes the method ABI, not availability or successful SAP signing
-from an ordinary sandboxed app on every supported iOS release. No live Apple ID
-login or Apple-platform build was performed in the Linux implementation
-environment. A successful native signing smoke test and real login on the target
-OS are required before claiming device compatibility.
+**Runtime compatibility is not established by fixture tests or an app build.**
+The iOS/macOS builds and Apple SDK syntax checks passed in GitHub Actions for
+`7c091cb`; the opt-in native signing smoke test was skipped. A subsequent iPhone
+test inside LiveContainer failed in the native `signatureWithData:error:` call,
+after the runtime, session and URL bag checks succeeded. The original build
+discarded the underlying error, so that report does not establish whether the
+failure is a handshake, native API or hosting restriction. The diagnostic build
+preserves safe error codes so the next device test can distinguish these cases.
+
+These are private system APIs. Current OS versions may remove their selectors,
+restrict their services, or require different device identity behavior. The iOS
+header establishes the ABI, not successful signing from a sandboxed app. Real
+sign-in on the target OS and hosting environment remains required before claiming
+device compatibility. LiveContainer sign-in is not currently verified working.

@@ -47,6 +47,9 @@ Apple's system signing service. The offline suite does not require an Apple ID.
 Build both app targets through `Asspp.xcworkspace` on a Mac, and verify sign-in,
 2FA, free license acquisition, latest/historical downloads and IPA installation
 on the target Apple devices before release.
+The first device test inside LiveContainer reached the native iOS signer but
+failed during signing. Current diagnostic errors retain the failing stage and
+system error codes; that environment is not yet verified working.
 
 The October 1 ipatool `ent/download` / kbsync generator is not ported: it depends
 on ipatool's emulated Apple runtime. This fork uses its supported legacy dispatch
