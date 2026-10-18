@@ -73,6 +73,9 @@ jobs:
           chmod +x Resources/Scripts/compile.release.mobile.ci.sh
           ./Resources/Scripts/compile.release.mobile.ci.sh "$(pwd)" "$(pwd)/Asspp.ipa"
 
+      - name: Validate iOS package identity
+        run: python3 Resources/Scripts/validate-release.py Asspp.ipa --platform ios
+
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
@@ -141,6 +144,9 @@ jobs:
         run: |
           chmod +x Resources/Scripts/compile.release.osx.sh
           ./Resources/Scripts/compile.release.osx.sh "$(pwd)" "$(pwd)/Asspp.zip"
+
+      - name: Validate macOS package identity
+        run: python3 Resources/Scripts/validate-release.py Asspp.zip --platform macos
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4

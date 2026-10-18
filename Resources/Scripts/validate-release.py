@@ -24,24 +24,26 @@ def version_settings(text):
     return values["MARKETING_VERSION"], values["CURRENT_PROJECT_VERSION"]
 
 
+def validate_app(path, platform, version, build):
+    info_path = {"ios": "Payload/Asspp.app/Info.plist", "macos": "Asspp.app/Contents/Info.plist"}[platform]
+    with zipfile.ZipFile(path) as archive:
+        require(archive.testzip() is None, f"Corrupt archive: {path.name}")
+        info = plistlib.loads(archive.read(info_path))
+        require(info.get("CFBundleIdentifier") == "wiki.qaq.Asspp", f"Wrong bundle ID: {path.name}")
+        require(info.get("CFBundleShortVersionString") == version, f"Wrong app version: {path.name}")
+        require(str(info.get("CFBundleVersion")) == build, f"Wrong build number: {path.name}")
+        if platform == "ios":
+            notices = [name for name in archive.namelist() if name.endswith("/SAPRuntimeLicenses.txt")]
+            require(len(notices) == 1, "iOS runtime license notice is missing")
+            require(b"GNU GENERAL PUBLIC LICENSE" in archive.read(notices[0]), "iOS GPL license is missing")
+
+
 def validate(artifacts, configuration, tag, commit, pins):
     version, build = version_settings(configuration.read_text())
     require(tag == f"v{version}", "Tag does not match the app version")
     require(re.fullmatch(r"[0-9a-f]{40}", commit) is not None, "Invalid source commit")
-    for filename, info_path in (
-        ("Asspp.ipa", "Payload/Asspp.app/Info.plist"),
-        ("Asspp.zip", "Asspp.app/Contents/Info.plist"),
-    ):
-        with zipfile.ZipFile(artifacts / filename) as archive:
-            require(archive.testzip() is None, f"Corrupt archive: {filename}")
-            info = plistlib.loads(archive.read(info_path))
-            require(info.get("CFBundleIdentifier") == "wiki.qaq.Asspp", f"Wrong bundle ID: {filename}")
-            require(info.get("CFBundleShortVersionString") == version, f"Wrong app version: {filename}")
-            require(str(info.get("CFBundleVersion")) == build, f"Wrong build number: {filename}")
-            if filename.endswith(".ipa"):
-                notices = [name for name in archive.namelist() if name.endswith("/SAPRuntimeLicenses.txt")]
-                require(len(notices) == 1, "iOS runtime license notice is missing")
-                require(b"GNU GENERAL PUBLIC LICENSE" in archive.read(notices[0]), "iOS GPL license is missing")
+    for filename, platform in (("Asspp.ipa", "ios"), ("Asspp.zip", "macos")):
+        validate_app(artifacts / filename, platform, version, build)
 
     with tarfile.open(artifacts / "Asspp-sources.tar.gz", "r:gz") as archive:
         def source(name):
@@ -73,11 +75,19 @@ def validate(artifacts, configuration, tag, commit, pins):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("artifacts", type=Path)
-    parser.add_argument("--tag", required=True)
-    parser.add_argument("--commit", required=True)
+    parser.add_argument("--platform", choices=("ios", "macos"), help="Validate a single app archive during CI")
+    parser.add_argument("--tag")
+    parser.add_argument("--commit")
     args = parser.parse_args()
     repository = Path(__file__).resolve().parents[2]
-    version, build = validate(args.artifacts, repository / "Configuration/Version.xcconfig",
-                              args.tag, args.commit,
-                              json.loads((repository / "Packages/SAPRuntime/source-pins.json").read_text()))
-    print(f"Validated Asspp {version} ({build}) and corresponding source at {args.commit}.")
+    configuration = repository / "Configuration/Version.xcconfig"
+    if args.platform:
+        version, build = version_settings(configuration.read_text())
+        validate_app(args.artifacts, args.platform, version, build)
+        print(f"Validated {args.platform} app identity: Asspp {version} ({build}).")
+    else:
+        if not args.tag or not args.commit:
+            parser.error("--tag and --commit are required for a complete release")
+        version, build = validate(args.artifacts, configuration, args.tag, args.commit,
+                                  json.loads((repository / "Packages/SAPRuntime/source-pins.json").read_text()))
+        print(f"Validated Asspp {version} ({build}) and corresponding source at {args.commit}.")
