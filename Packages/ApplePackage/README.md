@@ -10,7 +10,9 @@ The protocol changes follow these [majd/ipatool](https://github.com/majd/ipatool
 updates:
 
 - August 28, 2026: SAP-signed authentication (`abd86cb`). Asspp uses the native
-  Apple signing service rather than ipatool's desktop CPU emulator. See
+  Apple signing engine with explicit certificate/setup exchanges on iOS,
+  following ipatool's wire protocol. ipatool's CPU emulator and its jailbreak
+  iOS CLI are not embedded in this app. See
   [SAP-AUTHENTICATION.md](SAP-AUTHENTICATION.md) for runtime requirements and limits.
 - September 13: recover empty/unavailable volumeStore responses through the bag's
   redownload/update endpoints (`30b2909`), and allow packages without SINF (`dd28a3a`).
@@ -47,9 +49,11 @@ Apple's system signing service. The offline suite does not require an Apple ID.
 Build both app targets through `Asspp.xcworkspace` on a Mac, and verify sign-in,
 2FA, free license acquisition, latest/historical downloads and IPA installation
 on the target Apple devices before release.
-The first device test inside LiveContainer reached the native iOS signer but
-failed during signing. Current diagnostic errors retain the failing stage and
-system error codes; that environment is not yet verified working.
+The diagnostic build reached the native iOS session inside LiveContainer on
+iOS 27.0.1 but returned `SSErrorDomain/122`. The new iOS adapter replaces that
+session's internal networking with explicit certificate/setup requests and
+retains a separate error stage for each handshake step. That environment still
+requires device validation; self-signing alone is not a verified fix.
 
 The October 1 ipatool `ent/download` / kbsync generator is not ported: it depends
 on ipatool's emulated Apple runtime. This fork uses its supported legacy dispatch

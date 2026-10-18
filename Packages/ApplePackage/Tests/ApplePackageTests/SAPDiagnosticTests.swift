@@ -46,4 +46,12 @@ final class SAPDiagnosticTests: XCTestCase {
             XCTAssertTrue(SAPSigner.diagnosticError(failure).localizedDescription.contains(stage))
         }
     }
+
+    func testExplicitSetupFailuresRetainTheirStage() {
+        for stage in ["iOS.certificate", "iOS.context-init", "iOS.exchange-request", "iOS.setup-request", "iOS.exchange-response"] {
+            let failure = SAPSigner.operationError(stage: stage, cause: NSError(domain: "SSErrorDomain", code: 122))
+            let message = SAPSigner.diagnosticError(failure).localizedDescription
+            XCTAssertTrue(message.contains("\(stage); ApplePackage.SAP/2 -> SSErrorDomain/122"))
+        }
+    }
 }

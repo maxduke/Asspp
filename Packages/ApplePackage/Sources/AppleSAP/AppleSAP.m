@@ -5,16 +5,11 @@
 
 // Runtime interfaces, not hard-coded function addresses. Sources and limitations:
 // ../../SAP-AUTHENTICATION.md. Check every selector before calling private APIs.
-@interface APSAPBagInterpreter : NSObject
-- (NSURL *)mescalSetupURL;
-- (NSURL *)mescalCertificateURL;
-@end
-
-@interface APSAPMobileSession : NSObject
-- (instancetype)initWithURLBagDictionary:(NSDictionary *)bag SAPVersion:(long long)version;
-- (NSData *)signatureWithData:(NSData *)data error:(NSError **)error;
-- (long long)SAPVersion;
-- (APSAPBagInterpreter *)urlBagInterpreter;
+@interface APSAPMobileContext : NSObject
+- (instancetype)initWithSAPVersion:(long long)version;
+- (NSData *)exchangeData:(NSData *)data error:(NSError **)error;
+- (BOOL)isComplete;
+- (NSData *)signData:(NSData *)data error:(NSError **)error;
 @end
 
 @interface APSAPDesktopSession : NSObject
@@ -58,7 +53,8 @@ static NSError *APSAPOperationError(NSString *stage, NSError *cause) {
 }
 @end
 
-static NSData *APSAPNativeSign(NSData *data, NSDictionary *bag, NSError **error, NSString **stage) {
+static NSData *APSAPNativeSign(NSData *data, NSData *certificate, APSAPSetupExchange exchange,
+                              NSError **error, NSString **stage) {
 #if TARGET_OS_OSX
     *stage = @"macOS.load";
     static void *handle;
@@ -102,39 +98,72 @@ static NSData *APSAPNativeSign(NSData *data, NSDictionary *bag, NSError **error,
     dispatch_once(&once, ^{
         handle = dlopen("/System/Library/PrivateFrameworks/StoreServices.framework/StoreServices", RTLD_LAZY | RTLD_LOCAL);
     });
-    Class cls = handle ? NSClassFromString(@"SSVFairPlaySAPSession") : Nil;
-    if (!cls || ![cls instancesRespondToSelector:@selector(initWithURLBagDictionary:SAPVersion:)] ||
-        ![cls instancesRespondToSelector:@selector(signatureWithData:error:)] ||
-        ![cls instancesRespondToSelector:@selector(SAPVersion)] ||
-        ![cls instancesRespondToSelector:@selector(urlBagInterpreter)]) {
+    Class cls = handle ? NSClassFromString(@"SSVFairPlaySAPContext") : Nil;
+    if (!cls || ![cls instancesRespondToSelector:@selector(initWithSAPVersion:)] ||
+        ![cls instancesRespondToSelector:@selector(exchangeData:error:)] ||
+        ![cls instancesRespondToSelector:@selector(isComplete)] ||
+        ![cls instancesRespondToSelector:@selector(signData:error:)]) {
         *error = APSAPError(@"Apple SAP signing is unavailable on this iOS version. Login requires a supported physical device.");
         return nil;
     }
-    *stage = @"iOS.create-session";
-    APSAPMobileSession *session = [(APSAPMobileSession *)[cls alloc] initWithURLBagDictionary:bag SAPVersion:200];
-    if (!session) {
-        *error = APSAPError(@"Could not create the Apple SAP signing session.");
+    *stage = @"iOS.certificate";
+    if (![certificate isKindOfClass:[NSData class]] || certificate.length == 0 || !exchange) {
+        *error = APSAPError(@"Apple SAP setup is missing its certificate or exchange handler.");
         return nil;
     }
-    *stage = @"iOS.validate-bag";
-    APSAPBagInterpreter *interpreter = [session urlBagInterpreter];
-    if ([session SAPVersion] != 200 ||
-        ![interpreter respondsToSelector:@selector(mescalSetupURL)] ||
-        ![interpreter respondsToSelector:@selector(mescalCertificateURL)] ||
-        ![[interpreter mescalSetupURL].absoluteString isEqualToString:bag[@"sign-sap-setup"]] ||
-        ![[interpreter mescalCertificateURL].absoluteString isEqualToString:bag[@"sign-sap-setup-cert"]]) {
-        *error = APSAPError(@"The system SAP signer could not use the Apple Store signing configuration.");
+    *stage = @"iOS.context-init";
+    // StoreServices uses enum 0 for wire version 200 (enum 1 selects 210).
+    // ARC owns teardown through SSVFairPlaySAPContext's dealloc implementation.
+    APSAPMobileContext *context = [(APSAPMobileContext *)[cls alloc] initWithSAPVersion:0];
+    if (!context) {
+        *error = APSAPError(@"Could not create the Apple SAP signing context.");
+        return nil;
+    }
+    *stage = @"iOS.exchange-request";
+    NSData *request = [context exchangeData:certificate error:error];
+    if (*error || ![request isKindOfClass:[NSData class]] || request.length == 0 || [context isComplete]) {
+        if (!*error) *error = APSAPError(@"Apple SAP did not enter its setup-request state.");
+        return nil;
+    }
+    *stage = @"iOS.setup-request";
+    dispatch_semaphore_t received = dispatch_semaphore_create(0);
+    __block NSData *reply = nil;
+    __block NSError *exchangeError = nil;
+    APSAPCompletion *setupResult = [APSAPCompletion new];
+    setupResult.lock = [NSLock new];
+    setupResult.callback = ^(NSData *value, NSError *failure) {
+        reply = value;
+        exchangeError = failure;
+        dispatch_semaphore_signal(received);
+    };
+    exchange(request, ^(NSData *value, NSError *failure) {
+        [setupResult finish:value error:failure];
+    });
+    if (dispatch_semaphore_wait(received, dispatch_time(DISPATCH_TIME_NOW, 25 * NSEC_PER_SEC)) != 0) {
+        *error = APSAPError(@"Apple SAP setup did not reply before its deadline.");
+        return nil;
+    }
+    if (exchangeError || ![reply isKindOfClass:[NSData class]] || reply.length == 0) {
+        *error = exchangeError ?: APSAPError(@"Apple SAP setup returned an empty reply.");
+        return nil;
+    }
+    *stage = @"iOS.exchange-response";
+    // A successful final exchange may have no output bytes. Completion, rather
+    // than the returned buffer, decides whether the signing context is ready.
+    [context exchangeData:reply error:error];
+    if (*error || ![context isComplete]) {
+        if (!*error) *error = APSAPError(@"Apple SAP did not complete its setup exchange.");
         return nil;
     }
     *stage = @"iOS.sign";
-    return [session signatureWithData:data error:error];
+    return [context signData:data error:error];
 #else
     *error = APSAPError(@"Apple SAP signing requires a physical iOS device or macOS.");
     return nil;
 #endif
 }
 
-void APSAPSignData(NSData *data, NSDictionary<NSString *, id> *URLBag,
+void APSAPSignData(NSData *data, NSData *certificate, APSAPSetupExchange exchange,
                   void (^completion)(NSData *, NSError *)) {
     // A system call cannot safely be killed after timeout. Bound outstanding
     // native work so repeated retries cannot accumulate stuck worker threads.
@@ -159,7 +188,7 @@ void APSAPSignData(NSData *data, NSDictionary<NSString *, id> *URLBag,
             NSString *stage = @"native.sign";
             @try {
                 NSError *error = nil;
-                NSData *signature = APSAPNativeSign(data, URLBag, &error, &stage);
+                NSData *signature = APSAPNativeSign(data, certificate, exchange, &error, &stage);
                 if (error || ![signature isKindOfClass:[NSData class]] || signature.length == 0) {
                     // Swift extracts only stage/domain/code. Keep the original
                     // error internally, never its description or request data.

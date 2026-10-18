@@ -1,3 +1,4 @@
+import AsyncHTTPClient
 import Foundation
 #if canImport(AppleSAP)
 import AppleSAP
@@ -12,8 +13,8 @@ enum SAPSigner {
         guard version == "200" else {
             throw AuthenticationProtocol.ProtocolError("Apple returned an unsupported SAP signing version.")
         }
-        // Native StoreServices owns the handshake. Constrain its bag to the two
-        // expected Apple endpoints; no remote signer ever receives the payload.
+        // Constrain setup to the two expected Apple endpoints. The login body
+        // is signed locally and never enters either setup request.
         let endpoints = [
             "sign-sap-setup": ("fpinit.itunes.apple.com", "/v1/signSapSetup/legacy"),
             "sign-sap-setup-cert": ("s.mzstatic.com", "/sap/setupCert.plist"),
@@ -36,8 +37,44 @@ enum SAPSigner {
     static func sign(_ body: Data, bag: [String: Any]) async throws -> Data {
         try Task.checkCancellation()
         #if canImport(AppleSAP)
+        #if os(iOS) && !targetEnvironment(simulator)
+        let client = Configuration.makeHTTPClient(redirectConfiguration: .disallow)
+        defer { _ = client.shutdown() }
+        let certificate: Data
+        do {
+            certificate = try await SAPSetupProtocol.certificate(bag: bag) { request in
+                try await SAPSetupProtocol.send(request, using: client)
+            }
+        } catch {
+            try Task.checkCancellation()
+            throw diagnosticError(operationError(stage: "iOS.certificate", cause: error))
+        }
+        let exchange: APSAPSetupExchange = { request, completion in
+            Task {
+                do {
+                    let reply = try await SAPSetupProtocol.exchange(request, bag: bag) { outgoing in
+                        try await SAPSetupProtocol.send(outgoing, using: client)
+                    }
+                    completion(reply, nil)
+                } catch {
+                    completion(nil, error as NSError)
+                }
+            }
+        }
+        return try await nativeSign(body, certificate: certificate, exchange: exchange)
+        #else
+        return try await nativeSign(body, certificate: nil, exchange: nil)
+        #endif
+        #else
+        throw AuthenticationProtocol.ProtocolError("Apple SAP signing requires a physical iOS device or macOS.")
+        #endif
+    }
+
+    #if canImport(AppleSAP)
+    private static func nativeSign(_ body: Data, certificate: Data?, exchange: APSAPSetupExchange?) async throws -> Data {
+        try Task.checkCancellation()
         let signature: Data = try await withCheckedThrowingContinuation { continuation in
-            APSAPSignData(body, bag) { signature, error in
+            APSAPSignData(body, certificate, exchange) { signature, error in
                 if let error {
                     continuation.resume(throwing: diagnosticError(error as NSError))
                 } else if let signature, !signature.isEmpty {
@@ -49,9 +86,13 @@ enum SAPSigner {
         }
         try Task.checkCancellation()
         return signature
-        #else
-        throw AuthenticationProtocol.ProtocolError("Apple SAP signing requires a physical iOS device or macOS.")
-        #endif
+    }
+    #endif
+
+    static func operationError(stage: String, cause: Error) -> NSError {
+        NSError(domain: "ApplePackage.SAP", code: 2, userInfo: [
+            "ApplePackageSAPStage": stage, NSUnderlyingErrorKey: cause as NSError,
+        ])
     }
 
     /// Only fixed diagnostic metadata crosses the UI/logging boundary. Native
@@ -60,12 +101,14 @@ enum SAPSigner {
         let stages: Set<String> = [
             "native.sign", "native.capacity", "native.timeout",
             "iOS.load", "iOS.create-session", "iOS.validate-bag", "iOS.sign",
+            "iOS.certificate", "iOS.context-init", "iOS.exchange-request",
+            "iOS.setup-request", "iOS.exchange-response",
             "macOS.load", "macOS.create-session", "macOS.open-session", "macOS.sign",
         ]
         let reportedStage = error.userInfo["ApplePackageSAPStage"] as? String ?? "native.sign"
         let stage = stages.contains(reportedStage) ? reportedStage : "native.sign"
         let domains: Set<String> = [
-            "ApplePackage.SAP", "SSErrorDomain", "SSVErrorDomain", "AMSErrorDomain", "ASDErrorDomain",
+            "ApplePackage.SAP", "ApplePackage.SAP.HTTP", "SSErrorDomain", "SSVErrorDomain", "AMSErrorDomain", "ASDErrorDomain",
             NSURLErrorDomain, NSCocoaErrorDomain, NSOSStatusErrorDomain,
             "kCFErrorDomainCFNetwork", "kCFErrorDomainOSStatus", "AKAuthenticationError",
         ]
