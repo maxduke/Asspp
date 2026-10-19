@@ -97,7 +97,8 @@ Those iOS paths have been removed. During development, both upstream Unicorn
 and the source-built TCI interpreter completed real Apple setup and produced
 distinct signatures for two test payloads. The warm TCI probe took about 2.3
 seconds. The tester subsequently confirmed account login on a physical iPhone running
-iOS 27.0.1 inside LiveContainer on October 18, 2026. Other OS versions, installation
+iOS 27.0.1 inside LiveContainer on October 18, 2026. The cache-compaction build
+was also confirmed working by the tester on October 19, 2026. Other OS versions, installation
 methods, 2FA flows and token-rotation scenarios are not established by that report.
 
 ipatool source is MIT licensed. The new interpreter includes GPL-2.0 code; the

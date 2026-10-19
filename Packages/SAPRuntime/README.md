@@ -68,7 +68,9 @@ The macOS probe is ad-hoc signed with the hardened runtime and no JIT entitlemen
 It tests the same statically linked interpreter and ABI that iOS uses. Linux
 upstream and TCI probes passed real Apple setup and two distinct signatures;
 the cached TCI probe took about 2.3 seconds. Account login was confirmed on a
-physical iPhone running iOS 27.0.1 inside LiveContainer on October 18, 2026. This report does not cover every OS version,
+physical iPhone running iOS 27.0.1 inside LiveContainer on October 18, 2026. The
+tester also confirmed the cache-compaction build on October 19, 2026. This
+report does not cover every OS version,
 installation method, 2FA flow or account-rotation scenario.
 
 ## Licenses and corresponding source
