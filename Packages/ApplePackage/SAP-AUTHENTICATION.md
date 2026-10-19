@@ -27,9 +27,13 @@ offsets, device identity interposition, jailbreak entitlement or signing server
 is used. See its [README](../SAPRuntime/README.md) for source pins and build steps.
 
 The initial download reads byte ranges of Apple's pinned macOS restore image,
-extracts approximately 125 MB, verifies sizes and SHA-256 hashes, and writes an
-atomic cache inside the actual app container. Swift obtains this path from
-Foundation rather than the process-wide HOME, which can refer to LiveContainer.
+extracts approximately 125 MB, verifies original sizes and SHA-256 hashes, then
+retains and independently verifies only the arm64e slices used by the loader.
+The resulting cache is approximately 56 MB. Existing caches are compacted in
+place without another download; each atomic replacement can be retried safely
+after cancellation. Initial extraction traffic is unchanged. Swift obtains the
+cache path from Foundation rather than the process-wide HOME, which can refer
+to LiveContainer.
 Apple's binaries are downloaded on the device and are not redistributed in the
 IPA. Cold preparation displays a localized message and supports cancellation.
 

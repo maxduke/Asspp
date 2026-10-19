@@ -9,16 +9,22 @@ code, requests no executable translation buffers, and uses no private iOS
 StoreServices APIs. There is no third-party signing server or opaque WASM module.
 
 The local changes to ipatool are a cancellable C facade, an explicit app cache
-path, progress phases, a Configurator user agent for restore-image byte ranges,
-a setup redirect prohibition, and static Unicorn function references. The
+path, verified arm64e cache compaction, progress phases, a Configurator user
+agent for restore-image byte ranges, a setup redirect prohibition, and static
+Unicorn function references. The
 `uc_ctl` trampoline handles Apple's arm64 variadic calling convention. The TCI
 source preparation script disables Darwin JIT permission helpers in interpreter
 mode, including callback guards. Purego's callbacks use precompiled assembly
 trampolines; they do not allocate executable code.
 
 On first use, the runtime fetches byte ranges from Apple's pinned macOS 27.0.1
-restore image and extracts about 125 MB of SAP components. It validates each
-component's size and SHA-256, then caches it in the guest app's Caches directory.
+restore image and extracts about 125 MB of SAP components. It validates the
+original files, retains the same arm64e slices used by the loader, and checks
+their pinned sizes and SHA-256 hashes before caching about 56 MB in the guest
+app's Caches directory. Existing universal caches are verified and atomically
+compacted in place, one file at a time, without downloading them again. A partial
+migration can resume on the next attempt. This reduces retained data and warm
+reads by about 55%; the first download still extracts the original files.
 No Apple framework bytes are committed or bundled in the IPA. Setup sends only
 the certificate exchange envelope to Apple's SAP endpoint; login bytes are
 signed locally. A single interpreter slot bounds memory and serializes cold

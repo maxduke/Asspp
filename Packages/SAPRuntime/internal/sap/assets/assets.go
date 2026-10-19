@@ -7,15 +7,18 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"path/filepath"
+
+	"github.com/majd/ipatool/v2/internal/sap/machimage"
 )
 
 const (
-	macOSVersion        = "27.0.1"
-	macOSBuild          = "26A434"
-	macOSRestoreURL     = "https://updates.cdn-apple.com/2026FallFCS/59241290-5d51-4ca8-9df4-31624b9a4eac/UniversalMac_27.0.1_26A434_Restore.ipsw"
+	macOSVersion    = "27.0.1"
+	macOSBuild      = "26A434"
+	macOSRestoreURL = "https://updates.cdn-apple.com/2026FallFCS/59241290-5d51-4ca8-9df4-31624b9a4eac/UniversalMac_27.0.1_26A434_Restore.ipsw"
+	// Keep the existing directory so verified universal files can be compacted
+	// in place, without downloading them again or retaining a second cache.
 	assetCacheDirectory = "apple-assets-macos-27-26A434-arm64-v1"
 )
 
@@ -30,6 +33,10 @@ type fileSpec struct {
 	name   string
 	size   int
 	digest [32]byte
+	// Universal originals are verified before selecting the same arm64e slice
+	// that the Mach-O loader uses. Zero means the source is already compact.
+	universalSize   int
+	universalDigest [32]byte
 }
 
 var requiredFiles = []fileSpec{
@@ -39,14 +46,18 @@ var requiredFiles = []fileSpec{
 		digest: mustDigest("95f4558aa2c0ccd9f96ed479e336b630b46bf4b4e0baabc1c1ac8c7d55e21ab4"),
 	},
 	{
-		name:   "commerce",
-		size:   8092640,
-		digest: mustDigest("76de40a4a32f691947cb926ce3b128d2fc446f7cac9755f831c406cf5a316ac9"),
+		name:            "commerce",
+		size:            2735088,
+		digest:          mustDigest("c4b2088dd39aeb353f59cb57597902e8317aec66ae7da0414b03c5f932771343"),
+		universalSize:   8092640,
+		universalDigest: mustDigest("76de40a4a32f691947cb926ce3b128d2fc446f7cac9755f831c406cf5a316ac9"),
 	},
 	{
-		name:   "CoreFP",
-		size:   94842464,
-		digest: mustDigest("2c30fa2b5f695fd66c0360dce72f54757d03ddb7107549715c12cb359a003b46"),
+		name:            "CoreFP",
+		size:            30764976,
+		digest:          mustDigest("afbc123e688a822d980d5816cc2b52f69fde669d1dca92cf85627e1cbee587f6"),
+		universalSize:   94842464,
+		universalDigest: mustDigest("2c30fa2b5f695fd66c0360dce72f54757d03ddb7107549715c12cb359a003b46"),
 	},
 	{
 		name:   "CoreFP.icxs",
@@ -67,6 +78,10 @@ func Load(ctx context.Context) (Bundle, error) {
 
 // LoadDirectory uses the caller's actual app container without changing HOME.
 func LoadDirectory(ctx context.Context, directory string) (Bundle, error) {
+	return loadDirectory(ctx, directory, requiredFiles, resolveRemoteImage)
+}
+
+func loadDirectory(ctx context.Context, directory string, specs []fileSpec, resolve func(context.Context) (Bundle, error)) (Bundle, error) {
 	if ctx == nil {
 		return Bundle{}, errors.New("apple asset context is nil")
 	}
@@ -79,16 +94,20 @@ func LoadDirectory(ctx context.Context, directory string) (Bundle, error) {
 		return Bundle{}, errors.New("SAP cache directory must be absolute")
 	}
 
-	if bundle, err := readCache(directory); err == nil {
+	if bundle, err := readCache(ctx, directory, specs); err == nil {
 		return bundle, nil
 	}
 
-	bundle, err := resolveRemoteImage(ctx)
+	if err := ctx.Err(); err != nil {
+		return Bundle{}, fmt.Errorf("load Apple assets: %w", err)
+	}
+
+	bundle, err := resolve(ctx)
 	if err != nil {
 		return Bundle{}, err
 	}
 
-	if err := writeCache(directory, bundle); err != nil {
+	if err := writeCache(ctx, directory, bundle, specs); err != nil {
 		return Bundle{}, fmt.Errorf("cache Apple SAP assets: %w", err)
 	}
 
@@ -104,11 +123,14 @@ func cacheDirectory() (string, error) {
 	return filepath.Join(root, "ipatool", "sap", assetCacheDirectory), nil
 }
 
-func readCache(directory string) (Bundle, error) {
-	files := make(map[string][]byte, len(requiredFiles))
+func readCache(ctx context.Context, directory string, specs []fileSpec) (Bundle, error) {
+	files := make(map[string][]byte, len(specs))
 
-	for _, spec := range requiredFiles {
-		data, err := readCacheFile(filepath.Join(directory, spec.name), spec.size)
+	for _, spec := range specs {
+		if err := ctx.Err(); err != nil {
+			return Bundle{}, err
+		}
+		data, err := readCachedAsset(ctx, filepath.Join(directory, spec.name), spec)
 		if err != nil {
 			return Bundle{}, fmt.Errorf("read cached Apple SAP asset %s: %w", spec.name, err)
 		}
@@ -116,12 +138,60 @@ func readCache(directory string) (Bundle, error) {
 		files[spec.name] = data
 	}
 
-	bundle := bundleFrom(files)
-	if err := validate(bundle); err != nil {
-		return Bundle{}, err
+	return bundleFrom(files), ctx.Err()
+}
+
+func readCachedAsset(ctx context.Context, path string, spec fileSpec) ([]byte, error) {
+	data, err := readCacheFile(path, spec.size)
+	if err == nil {
+		return data, validateFile(data, spec)
+	}
+	if spec.universalSize == 0 {
+		return nil, err
 	}
 
-	return bundle, nil
+	data, err = readCacheFile(path, spec.universalSize)
+	if err != nil {
+		return nil, err
+	}
+	data, err = compactSource(data, spec)
+	if err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	// Each replacement is atomic. A cancelled migration may leave a mix of
+	// universal and compact files, both of which are accepted on the next load.
+	// Compaction is best effort: a verified existing cache must remain usable
+	// when there is not enough space to persist a compact copy. Do not turn a
+	// local cache-write failure into another download.
+	_ = replaceFile(path, data)
+	return data, nil
+}
+
+func (spec fileSpec) source() fileSpec {
+	if spec.universalSize == 0 {
+		return spec
+	}
+	return fileSpec{name: spec.name, size: spec.universalSize, digest: spec.universalDigest}
+}
+
+func compactSource(data []byte, spec fileSpec) ([]byte, error) {
+	if err := validateFile(data, spec.source()); err != nil {
+		return nil, err
+	}
+	if spec.universalSize != 0 {
+		var err error
+		data, err = machimage.ARM64ESlice(data)
+		if err != nil {
+			return nil, fmt.Errorf("select %s arm64e slice: %w", spec.name, err)
+		}
+		if err := validateFile(data, spec); err != nil {
+			return nil, err
+		}
+	}
+	return data, nil
 }
 
 func readCacheFile(path string, expectedSize int) ([]byte, error) {
@@ -160,8 +230,8 @@ func readCacheFile(path string, expectedSize int) ([]byte, error) {
 	return data, nil
 }
 
-func writeCache(directory string, bundle Bundle) error {
-	if err := validate(bundle); err != nil {
+func writeCache(ctx context.Context, directory string, bundle Bundle, specs []fileSpec) error {
+	if err := validateFiles(bundle, specs); err != nil {
 		return err
 	}
 
@@ -170,13 +240,16 @@ func writeCache(directory string, bundle Bundle) error {
 	}
 
 	files := bundleFiles(bundle)
-	for _, spec := range requiredFiles {
+	for _, spec := range specs {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if err := replaceFile(filepath.Join(directory, spec.name), files[spec.name]); err != nil {
 			return fmt.Errorf("write cached SAP asset %s: %w", spec.name, err)
 		}
 	}
 
-	return nil
+	return ctx.Err()
 }
 
 func replaceFile(path string, data []byte) error {
@@ -204,14 +277,6 @@ func replaceFile(path string, data []byte) error {
 		return fmt.Errorf("close temporary cache file: %w", err)
 	}
 
-	if err := os.Rename(temporaryPath, path); err == nil {
-		return nil
-	}
-
-	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return fmt.Errorf("remove existing cache file: %w", err)
-	}
-
 	if err := os.Rename(temporaryPath, path); err != nil {
 		return fmt.Errorf("install cache file: %w", err)
 	}
@@ -220,18 +285,27 @@ func replaceFile(path string, data []byte) error {
 }
 
 func validate(bundle Bundle) error {
-	files := bundleFiles(bundle)
-	for _, spec := range requiredFiles {
-		data := files[spec.name]
-		if len(data) != spec.size {
-			return fmt.Errorf("apple SAP asset %s has size %d, expected %d", spec.name, len(data), spec.size)
-		}
+	return validateFiles(bundle, requiredFiles)
+}
 
-		if sha256.Sum256(data) != spec.digest {
-			return fmt.Errorf("apple SAP asset %s failed integrity verification", spec.name)
+func validateFiles(bundle Bundle, specs []fileSpec) error {
+	files := bundleFiles(bundle)
+	for _, spec := range specs {
+		if err := validateFile(files[spec.name], spec); err != nil {
+			return err
 		}
 	}
 
+	return nil
+}
+
+func validateFile(data []byte, spec fileSpec) error {
+	if len(data) != spec.size {
+		return fmt.Errorf("apple SAP asset %s has size %d, expected %d", spec.name, len(data), spec.size)
+	}
+	if sha256.Sum256(data) != spec.digest {
+		return fmt.Errorf("apple SAP asset %s failed integrity verification", spec.name)
+	}
 	return nil
 }
 

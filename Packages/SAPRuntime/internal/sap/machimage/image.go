@@ -51,7 +51,7 @@ func (i *Image) Base() uint64 {
 
 //nolint:wsl // Image validation and fixup discovery are clearer in execution order.
 func Open(name string, input []byte) (*Image, error) {
-	data, err := arm64Slice(input)
+	data, err := ARM64ESlice(input)
 	if err != nil {
 		return nil, fmt.Errorf("open %s: %w", name, err)
 	}
@@ -165,7 +165,10 @@ func (i *Image) removePointerAuthentication() error {
 	return nil
 }
 
-func arm64Slice(input []byte) ([]byte, error) {
+// ARM64ESlice returns a private copy of the selected arm64e image, or of the
+// entire input if it is already thin. Cache compaction shares this selection
+// with the loader so it cannot change which architecture the guest executes.
+func ARM64ESlice(input []byte) ([]byte, error) {
 	fat, err := macho.NewFatFile(bytes.NewReader(input))
 	if err != nil {
 		return bytes.Clone(input), nil

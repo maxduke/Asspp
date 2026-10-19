@@ -16,8 +16,8 @@ var _ = Describe("macOS 27 asset profile", func() {
 	It("pins every runtime artifact by size and digest", func() {
 		Expect(requiredFiles).To(ConsistOf(
 			fileSpec{name: "AppleMediaServices", size: 14813888, digest: mustDigest("95f4558aa2c0ccd9f96ed479e336b630b46bf4b4e0baabc1c1ac8c7d55e21ab4")},
-			fileSpec{name: "commerce", size: 8092640, digest: mustDigest("76de40a4a32f691947cb926ce3b128d2fc446f7cac9755f831c406cf5a316ac9")},
-			fileSpec{name: "CoreFP", size: 94842464, digest: mustDigest("2c30fa2b5f695fd66c0360dce72f54757d03ddb7107549715c12cb359a003b46")},
+			fileSpec{name: "commerce", size: 2735088, digest: mustDigest("c4b2088dd39aeb353f59cb57597902e8317aec66ae7da0414b03c5f932771343"), universalSize: 8092640, universalDigest: mustDigest("76de40a4a32f691947cb926ce3b128d2fc446f7cac9755f831c406cf5a316ac9")},
+			fileSpec{name: "CoreFP", size: 30764976, digest: mustDigest("afbc123e688a822d980d5816cc2b52f69fde669d1dca92cf85627e1cbee587f6"), universalSize: 94842464, universalDigest: mustDigest("2c30fa2b5f695fd66c0360dce72f54757d03ddb7107549715c12cb359a003b46")},
 			fileSpec{name: "CoreFP.icxs", size: 7365344, digest: mustDigest("cb8f55330ec567da3e692dab5f5388bed0312dd9093340477c5759078cc2aa7b")},
 		))
 	})

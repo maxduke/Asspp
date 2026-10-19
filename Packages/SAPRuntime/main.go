@@ -69,7 +69,7 @@ func AssppSAPSign(id C.ulonglong, cacheRoot *C.char, hardware *C.uchar, hardware
 		fail(op.ctx.Err())
 		return
 	}
-	// Release the 125 MB asset buffers and guest pages promptly after signing.
+	// Release the compact asset buffers and guest pages promptly after signing.
 	defer debug.FreeOSMemory()
 	signer, err := sap.NewSigner(op.ctx, sap.Config{
 		SetupURL:       "https://fpinit.itunes.apple.com/v1/signSapSetup/legacy",
